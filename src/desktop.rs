@@ -1,22 +1,31 @@
-//! Native desktop window. No title bar, no browser, no web view.
+//! Native desktop window. No title bar, no browser.
 
+use crate::preview3d::SkinPreview;
+use crate::skinmodel::ArmModel;
 use crate::state::{now_ms, App, Job};
 use crate::wallpapers::{self, Paper};
-use eframe::egui::{self, CursorIcon, ResizeDirection, Sense, ViewportCommand};
+use eframe::egui::{self, CursorIcon, ResizeDirection, RichText, Sense, ViewportCommand};
+use image::RgbaImage;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(198, 242, 92);
-const INK: egui::Color32 = egui::Color32::from_rgb(16, 20, 10);
-const BG: egui::Color32 = egui::Color32::from_rgb(8, 8, 8);
-const SIDE: egui::Color32 = egui::Color32::from_rgb(12, 12, 12);
-const PANEL: egui::Color32 = egui::Color32::from_rgb(18, 18, 18);
-const LINE: egui::Color32 = egui::Color32::from_rgb(42, 42, 42);
-const DIM: egui::Color32 = egui::Color32::from_rgb(176, 176, 176);
-const MUTED: egui::Color32 = egui::Color32::from_rgb(118, 118, 118);
-const EXIT_HOT: egui::Color32 = egui::Color32::from_rgb(240, 176, 172);
+const BG: egui::Color32 = egui::Color32::from_rgb(0x0B, 0x0D, 0x0A);
+const RAIL: egui::Color32 = egui::Color32::from_rgb(0x10, 0x13, 0x0E);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x13, 0x17, 0x10);
+const SURFACE2: egui::Color32 = egui::Color32::from_rgb(0x17, 0x1B, 0x13);
+const SELECTED: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x22, 0x17);
+const BORDER: egui::Color32 = egui::Color32::from_rgb(0x23, 0x28, 0x20);
+const BORDER_BTN: egui::Color32 = egui::Color32::from_rgb(0x2C, 0x33, 0x26);
+const BORDER_INPUT: egui::Color32 = egui::Color32::from_rgb(0x4A, 0x52, 0x42);
+const MARKER_OFF: egui::Color32 = egui::Color32::from_rgb(0x3A, 0x40, 0x34);
+const TEXT: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xF2, 0xE6);
+const MUTED: egui::Color32 = egui::Color32::from_rgb(0xA9, 0xB1, 0xA0);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xC6, 0xF2, 0x5A);
+const ON_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x0B, 0x0D, 0x0A);
+const ERR: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xA0, 0x98);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -49,7 +58,6 @@ impl Tab {
 struct Ver {
     id: String,
     channel: String,
-    released: String,
     installed: bool,
 }
 
@@ -72,6 +80,8 @@ struct Desktop {
     selected: String,
     papers: HashMap<String, egui::TextureHandle>,
     mark: Option<egui::TextureHandle>,
+    avatar: Option<egui::TextureHandle>,
+    avatar_key: String,
     mods: Vec<(String, bool, u64)>,
     username: String,
     ram: u32,
@@ -83,43 +93,35 @@ struct Desktop {
     cape: String,
     engine: String,
     notice: String,
+    import_error: String,
     job_id: Option<String>,
     patches: Vec<crate::state::PatchState>,
     shot: Option<String>,
     frames: u32,
     shot_requested: bool,
+    film: usize,
+    play_after: bool,
+    preview: SkinPreview,
+    drop_hover: bool,
 }
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 760.0])
-        .with_min_inner_size([1040.0, 680.0])
+        .with_min_inner_size([1100.0, 680.0])
         .with_decorations(false)
         .with_resizable(true)
         .with_title("Rus")
         .with_icon(icon_data());
-    let options = eframe::NativeOptions {
-        viewport,
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Rus",
-        options,
-        Box::new(move |cc| Ok(Box::new(Desktop::new(cc, shot, tab)))),
-    )
-    .map_err(|e| e.to_string())
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    eframe::run_native("Rus", options, Box::new(move |cc| Ok(Box::new(Desktop::new(cc, shot, tab)))))
+        .map_err(|e| e.to_string())
 }
 
 fn icon_data() -> egui::IconData {
-    let img = image::load_from_memory(include_bytes!("../assets/mark-32.png"))
-        .expect("mark")
-        .to_rgba8();
+    let img = image::load_from_memory(include_bytes!("../assets/mark-32.png")).expect("mark").to_rgba8();
     let (w, h) = img.dimensions();
-    egui::IconData {
-        rgba: img.into_raw(),
-        width: w,
-        height: h,
-    }
+    egui::IconData { rgba: img.into_raw(), width: w, height: h }
 }
 
 impl Desktop {
@@ -132,11 +134,9 @@ impl Desktop {
         let _ = crate::skin::materialize_preset(&app, "cape", "rus");
         let settings = app.settings();
         let (tx, rx) = mpsc::channel();
-        let selected = if settings.last_version.is_empty() {
-            "26.3".into()
-        } else {
-            settings.last_version.clone()
-        };
+        let selected = if settings.last_version.is_empty() { "26.3".into() } else { settings.last_version.clone() };
+        let mut preview = SkinPreview::default();
+        preview.arms = if settings.skin_model == "slim" { ArmModel::Slim } else if settings.skin == "preset:alex" { ArmModel::Slim } else { ArmModel::Classic };
         let me = Self {
             app: app.clone(),
             tx: tx.clone(),
@@ -148,6 +148,8 @@ impl Desktop {
             selected,
             papers: HashMap::new(),
             mark: load_texture(&cc.egui_ctx, "mark", include_bytes!("../assets/mark-32.png")),
+            avatar: None,
+            avatar_key: String::new(),
             mods: Vec::new(),
             username: settings.username,
             ram: settings.ram_mb,
@@ -159,11 +161,16 @@ impl Desktop {
             cape: settings.cape,
             engine: settings.engine,
             notice: "Ready".into(),
+            import_error: String::new(),
             job_id: None,
             patches: crate::install::patch_defs(),
             shot,
             frames: 0,
             shot_requested: false,
+            film: 0,
+            play_after: false,
+            preview,
+            drop_hover: false,
         };
         spawn_versions(app.clone(), tx.clone());
         spawn_mods(app.clone(), tx.clone());
@@ -176,9 +183,7 @@ impl Desktop {
             match msg {
                 Msg::Versions(v) => {
                     if self.selected.is_empty() {
-                        if let Some(first) = v.first() {
-                            self.selected = first.id.clone();
-                        }
+                        if let Some(first) = v.first() { self.selected = first.id.clone(); }
                     }
                     self.versions_note = format!("{} versions", v.len());
                     self.versions = v;
@@ -191,6 +196,16 @@ impl Desktop {
                 }
                 Msg::Notice(s) => self.notice = s,
                 Msg::Mods(m) => self.mods = m,
+            }
+        }
+        if self.play_after {
+            if let Some(state) = self.job_state() {
+                if state == "done" && self.app.is_installed(&self.selected) {
+                    self.play_after = false;
+                    self.launch_selected();
+                } else if state == "error" {
+                    self.play_after = false;
+                }
             }
         }
     }
@@ -207,20 +222,19 @@ impl Desktop {
         s.cape = self.cape.clone();
         s.engine = self.engine.clone();
         s.last_version = self.selected.clone();
+        s.skin_model = match self.preview.arms {
+            ArmModel::Slim => "slim".into(),
+            ArmModel::Classic => "classic".into(),
+            ArmModel::Auto => {
+                if self.detected_slim() { "slim".into() } else { "classic".into() }
+            }
+        };
         self.app.update_settings(s);
     }
 
-    fn paper_for(&self, id: &str) -> &'static Paper {
-        wallpapers::for_version(id)
-    }
+    fn paper_for(&self, id: &str) -> &'static Paper { wallpapers::for_version(id) }
 
-    fn play(&mut self) {
-        let running = crate::play::status();
-        if running.get("running").and_then(|v| v.as_bool()).unwrap_or(false) {
-            let _ = crate::play::kill();
-            self.notice = "Stopped".into();
-            return;
-        }
+    fn launch_selected(&mut self) {
         self.save_settings();
         if self.engine == "horizon" {
             let app = self.app.clone();
@@ -228,11 +242,7 @@ impl Desktop {
             self.notice = "Preparing Horizon…".into();
             std::thread::spawn(move || {
                 let msg = match crate::horizon::start(app) {
-                    Ok(v) => v
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("Horizon is starting")
-                        .to_string(),
+                    Ok(v) => v.get("message").and_then(|m| m.as_str()).unwrap_or("Horizon is starting").to_string(),
                     Err(e) => e,
                 };
                 let _ = tx.send(Msg::Notice(msg));
@@ -240,11 +250,6 @@ impl Desktop {
             return;
         }
         let id = self.selected.clone();
-        if !self.app.is_installed(&id) {
-            self.tab = Tab::Versions;
-            self.start_install();
-            return;
-        }
         let app = self.app.clone();
         let tx = self.tx.clone();
         self.notice = format!("Starting {id}…");
@@ -257,6 +262,21 @@ impl Desktop {
         });
     }
 
+    fn play(&mut self) {
+        let running = crate::play::status();
+        if running.get("running").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let _ = crate::play::kill();
+            self.notice = "Stopped".into();
+            return;
+        }
+        if self.engine != "horizon" && !self.app.is_installed(&self.selected) {
+            self.play_after = true;
+            self.start_install();
+            return;
+        }
+        self.launch_selected();
+    }
+
     fn start_install(&mut self) {
         let version = self.selected.clone();
         if version.is_empty() {
@@ -265,9 +285,7 @@ impl Desktop {
         }
         let id = format!("job-{}", now_ms());
         let mut patches = self.patches.clone();
-        for p in patches.iter_mut() {
-            p.status = "pending".into();
-        }
+        for p in patches.iter_mut() { p.status = "pending".into(); }
         let job = Arc::new(Mutex::new(Job::new(id.clone(), version.clone(), patches)));
         self.app.jobs.lock().unwrap().insert(id.clone(), job.clone());
         *self.app.last_job.lock().unwrap() = Some(id.clone());
@@ -284,27 +302,104 @@ impl Desktop {
         Some((j.progress as f32, format!("{} · {}", j.state, j.message)))
     }
 
+    fn job_state(&self) -> Option<String> {
+        let id = self.job_id.as_ref()?;
+        let job = self.app.job(id)?;
+        let guard = job.lock().ok()?;
+        Some(guard.state.clone())
+    }
+
     fn quit(&self, ctx: &egui::Context) {
         let _ = crate::play::kill();
         ctx.send_viewport_cmd(ViewportCommand::Close);
+    }
+
+    fn skin_image(&self) -> Option<RgbaImage> {
+        let path = crate::skin::resolve_texture(&self.app, &self.skin)?;
+        let bytes = std::fs::read(path).ok()?;
+        let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+        crate::skinmodel::prepare_skin(&img).ok()
+    }
+
+    fn cape_image(&self) -> Option<RgbaImage> {
+        let path = crate::skin::resolve_texture(&self.app, &self.cape)?;
+        let bytes = std::fs::read(path).ok()?;
+        let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+        crate::skinmodel::prepare_cape(&img).ok()
+    }
+
+    fn detected_slim(&self) -> bool {
+        if self.skin == "preset:alex" { return true; }
+        if self.skin == "preset:steve" { return false; }
+        self.skin_image().map(|img| crate::skinmodel::detect_slim(&img)).unwrap_or(false)
+    }
+
+    fn refresh_avatar(&mut self, ctx: &egui::Context) {
+        if self.avatar_key == self.skin && self.avatar.is_some() { return; }
+        let Some(img) = self.skin_image() else { return; };
+        let face = crate::skinmodel::face_avatar(&img, 32);
+        let color = egui::ColorImage::from_rgba_unmultiplied([32, 32], face.as_raw());
+        self.avatar = Some(ctx.load_texture("avatar", color, egui::TextureOptions::NEAREST));
+        self.avatar_key = self.skin.clone();
+        self.preview.invalidate();
+    }
+
+    fn import_bytes(&mut self, kind: &str, bytes: &[u8]) {
+        match crate::skin::import_texture(&self.app, kind, bytes) {
+            Ok(id) => {
+                if kind == "cape" { self.cape = id; } else { self.skin = id; self.preview.arms = ArmModel::Auto; }
+                self.import_error.clear();
+                self.avatar_key.clear();
+                self.preview.invalidate();
+                self.save_settings();
+            }
+            Err(e) => self.import_error = e,
+        }
+    }
+
+    fn import_path(&mut self, kind: &str, path: &std::path::Path) {
+        match std::fs::read(path) {
+            Ok(bytes) => self.import_bytes(kind, &bytes),
+            Err(e) => self.import_error = e.to_string(),
+        }
     }
 }
 
 impl eframe::App for Desktop {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [8.0 / 255.0, 8.0 / 255.0, 8.0 / 255.0, 1.0]
+        [0x0B as f32 / 255.0, 0x0D as f32 / 255.0, 0x0A as f32 / 255.0, 1.0]
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump(ctx);
-        ctx.request_repaint_after(Duration::from_millis(250));
+        self.refresh_avatar(ctx);
+        ctx.request_repaint_after(Duration::from_millis(if self.preview.auto_rotate || self.preview.walk { 16 } else { 250 }));
+        if !ctx.wants_keyboard_input() {
+            if ctx.input(|i| i.key_pressed(egui::Key::Num1)) { self.tab = Tab::Home; }
+            if ctx.input(|i| i.key_pressed(egui::Key::Num2)) { self.tab = Tab::Versions; }
+            if ctx.input(|i| i.key_pressed(egui::Key::Num3)) { self.tab = Tab::Mods; }
+            if ctx.input(|i| i.key_pressed(egui::Key::Num4)) { self.tab = Tab::Settings; }
+        }
+        let drops: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        for path in drops {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
+            if name.ends_with(".jar") {
+                self.tab = Tab::Mods;
+                match crate::mods::add_path(&self.app, &path) {
+                    Ok(n) => self.notice = format!("Added {n}"),
+                    Err(e) => self.notice = e,
+                }
+                spawn_mods(self.app.clone(), self.tx.clone());
+            } else if name.ends_with(".png") && self.tab == Tab::Settings {
+                self.import_path("skin", &path);
+            }
+        }
 
         egui::SidePanel::left("side")
-            .exact_width(248.0)
+            .exact_width(232.0)
             .resizable(false)
-            .frame(egui::Frame::new().fill(SIDE).inner_margin(14.0))
+            .frame(egui::Frame::new().fill(RAIL).inner_margin(16.0))
             .show(ctx, |ui| self.sidebar(ui));
-
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG))
             .show(ctx, |ui| match self.tab {
@@ -313,25 +408,12 @@ impl eframe::App for Desktop {
                 Tab::Mods => self.page_mods(ui),
                 Tab::Settings => self.page_settings(ui),
             });
-
-        let screen = ctx.screen_rect();
-        let seam = egui::Rect::from_min_max(
-            egui::pos2(248.0, 0.0),
-            egui::pos2(249.0, screen.height()),
-        );
-        ctx.layer_painter(egui::LayerId::background()).rect_filled(seam, 0.0, LINE);
         window_edges(ctx);
         paint_frame(ctx);
-
         self.frames += 1;
         let paper_ready = self.papers.contains_key(self.paper_for(&self.selected).title);
         let versions_ready = !self.versions.is_empty() || self.frames > 40;
-        if self.shot.is_some()
-            && !self.shot_requested
-            && self.frames > 6
-            && (paper_ready || self.frames > 90)
-            && versions_ready
-        {
+        if self.shot.is_some() && !self.shot_requested && self.frames > 6 && (paper_ready || self.frames > 90) && versions_ready {
             self.shot_requested = true;
             ctx.send_viewport_cmd(ViewportCommand::Screenshot(Default::default()));
         }
@@ -343,7 +425,6 @@ impl eframe::App for Desktop {
                         let _ = save_png(path, image);
                         std::process::exit(0);
                     }
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
             }
         });
@@ -352,188 +433,138 @@ impl eframe::App for Desktop {
 
 impl Desktop {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        drag_block(ui, 58.0, |ui, rect| {
+        drag_block(ui, 52.0, |ui, rect| {
             if let Some(mark) = &self.mark {
-                let mark_rect = egui::Rect::from_min_size(rect.min + egui::vec2(2.0, 8.0), egui::vec2(40.0, 40.0));
-                ui.painter().image(mark.id(), mark_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                let r = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 4.0), egui::vec2(40.0, 40.0));
+                ui.painter().image(mark.id(), r, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
             }
-            ui.painter().text(
-                rect.min + egui::vec2(52.0, 16.0),
-                egui::Align2::LEFT_TOP,
-                "RUS",
-                egui::FontId::proportional(26.0),
-                egui::Color32::WHITE,
-            );
-            ui.painter().text(
-                rect.min + egui::vec2(52.0, 40.0),
-                egui::Align2::LEFT_TOP,
-                "JAVA EDITION",
-                egui::FontId::proportional(10.0),
-                MUTED,
-            );
+            ui.painter().text(rect.min + egui::vec2(50.0, 12.0), egui::Align2::LEFT_TOP, "RUS", egui::FontId::proportional(26.0), TEXT);
         });
-        ui.add_space(10.0);
+        ui.add_space(14.0);
         for tab in [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings] {
-            if nav_button(ui, tab.label(), self.tab == tab) {
-                self.tab = tab;
-            }
+            if nav_button(ui, tab.label(), self.tab == tab) { self.tab = tab; }
             ui.add_space(4.0);
         }
-
-        let footer = 292.0;
-        let gap = (ui.available_height() - footer).max(8.0);
+        let gap = (ui.available_height() - 148.0).max(8.0);
         drag_block(ui, gap, |_, _| {});
-
-        ui.label(egui::RichText::new("LOCAL ACCOUNT").size(10.0).color(ACCENT));
-        ui.label(egui::RichText::new(&self.username).strong());
-        ui.add_space(6.0);
-        let box_ = crate::sandbox::describe(&self.app);
-        let label = box_.get("label").and_then(|v| v.as_str()).unwrap_or("Sandbox");
-        ui.label(egui::RichText::new(label).size(11.0).strong().color(ACCENT));
+        account_chip(ui, self.avatar.as_ref(), &self.username);
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("LAUNCH WITH").size(10.0).color(MUTED));
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 8.0) / 2.0;
-            if engine_button(ui, "Vanilla", w, self.engine != "horizon") {
-                self.engine = "vanilla".into();
-                self.save_settings();
+            if button(ui, "Minimize", w, 44.0, false) {
+                ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true));
             }
-            if engine_button(ui, "Horizon", w, self.engine == "horizon") {
-                self.engine = "horizon".into();
-                self.save_settings();
+            if button(ui, "Exit", w, 44.0, false) {
+                self.quit(ui.ctx());
             }
         });
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("SELECTED").size(10.0).color(MUTED));
-        ui.label(
-            egui::RichText::new(if self.engine == "horizon" {
-                "26.3"
-            } else {
-                self.selected.as_str()
-            })
-            .strong()
-            .color(egui::Color32::WHITE),
-        );
-        ui.add_space(8.0);
-        let running = crate::play::status();
-        let live = running.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
-        let play_label = if live {
-            "STOP"
-        } else if self.engine == "horizon" {
-            "PLAY HORIZON"
-        } else {
-            "PLAY"
-        };
-        let full = ui.available_width();
-        if solid_button(
-            ui,
-            play_label,
-            full,
-            44.0,
-            if live { egui::Color32::from_rgb(42, 24, 24) } else { ACCENT },
-            if live { EXIT_HOT } else { INK },
-        ) {
-            self.play();
-        }
-        ui.add_space(6.0);
-        if solid_button(ui, "Exit", full, 36.0, egui::Color32::from_rgb(22, 22, 22), egui::Color32::WHITE) {
-            self.quit(ui.ctx());
-        }
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new(&self.notice).size(11.0).color(DIM));
     }
 
     fn page_home(&mut self, ui: &mut egui::Ui) {
-        let rect = ui.available_rect_before_wrap();
-        let resp = ui.allocate_rect(rect, Sense::click_and_drag());
-        if resp.drag_started() {
-            ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
-        }
-        if resp.double_clicked() {
-            toggle_max(ui.ctx());
-        }
+        let full = ui.available_rect_before_wrap();
+        let _ = ui.allocate_rect(full, Sense::hover());
+        let hero_h = (full.height() - 168.0).clamp(360.0, 520.0);
+        let hero = egui::Rect::from_min_size(full.min, egui::vec2(full.width(), hero_h));
+        let drag = ui.interact(hero, egui::Id::new("hero-drag"), Sense::click_and_drag());
+        if drag.drag_started() { ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag); }
+        if drag.double_clicked() { toggle_max(ui.ctx()); }
         let paper = self.paper_for(&self.selected);
         if let Some(tex) = self.papers.get(paper.title) {
-            let uv = cover_uv(tex.size_vec2(), rect);
-            ui.painter().image(tex.id(), rect, uv, egui::Color32::WHITE);
+            ui.painter().image(tex.id(), hero, cover_uv(tex.size_vec2(), hero), egui::Color32::WHITE);
         } else {
-            ui.painter().rect_filled(rect, 0.0, PANEL);
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Fetching the official collection wallpaper…",
-                egui::FontId::proportional(16.0),
-                DIM,
-            );
+            ui.painter().rect_filled(hero, 0.0, SURFACE);
+            ui.painter().text(hero.center(), egui::Align2::CENTER_CENTER, "Fetching the collection wallpaper…", egui::FontId::proportional(16.0), MUTED);
         }
-        paint_fade(ui, rect);
-        let installed = self.app.is_installed(&self.selected);
-        let status = if installed { "Installed" } else { "Not installed" };
+        paint_fade(ui, hero);
         ui.painter().text(
-            egui::pos2(rect.left() + 22.0, rect.bottom() - 196.0),
+            hero.min + egui::vec2(28.0, 18.0),
             egui::Align2::LEFT_TOP,
-            paper.title,
-            egui::FontId::proportional(36.0),
-            egui::Color32::WHITE,
+            "Collection wallpaper, loaded from minecraft.net",
+            egui::FontId::proportional(13.0),
+            TEXT,
         );
-        ui.painter().text(
-            egui::pos2(rect.left() + 22.0, rect.bottom() - 152.0),
-            egui::Align2::LEFT_TOP,
-            format!("{}   ·   {}   ·   sandbox", self.selected, status),
-            egui::FontId::proportional(14.0),
-            DIM,
+        let card = egui::Rect::from_min_max(
+            egui::pos2(hero.left() + 24.0, hero.bottom() - 156.0),
+            egui::pos2(hero.right() - 24.0, hero.bottom() - 18.0),
         );
-
-        let strip = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 16.0, rect.bottom() - 128.0),
-            egui::pos2(rect.right() - 8.0, rect.bottom() - 12.0),
-        );
-        let ctx = ui.ctx().clone();
-        let papers = self.papers.clone();
-        let selected = self.selected.clone();
-        let mut pick: Option<String> = None;
-        egui::Area::new(egui::Id::new("collection-strip"))
-            .order(egui::Order::Middle)
-            .fixed_pos(strip.min)
-            .show(&ctx, |ui| {
-                ui.set_width(strip.width());
-                ui.set_height(strip.height());
-                egui::ScrollArea::horizontal().id_salt("films").show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        for paper in wallpapers::all() {
-                            let size = egui::vec2(100.0, 100.0);
-                            let on = paper.prefixes.iter().any(|p| version_hit(&selected, p));
-                            if let Some(tex) = papers.get(paper.title) {
-                                let img = ui.add(
-                                    egui::Image::from_texture((tex.id(), tex.size_vec2()))
-                                        .fit_to_exact_size(size)
-                                        .sense(Sense::click()),
-                                );
-                                if on {
-                                    ui.painter().rect_stroke(
-                                        img.rect.expand(1.0),
-                                        0.0,
-                                        egui::Stroke::new(2.0_f32, ACCENT),
-                                        egui::StrokeKind::Outside,
-                                    );
-                                }
-                                img.clone().on_hover_text(paper.title);
-                                if img.clicked() {
-                                    if let Some(prefix) = paper.prefixes.first() {
-                                        pick = Some((*prefix).to_string());
-                                    }
-                                }
-                            } else {
-                                let (r, _) = ui.allocate_exact_size(size, Sense::hover());
-                                ui.painter().rect_filled(r, 0.0, PANEL);
-                            }
-                        }
-                    });
-                });
+        ui.painter().rect_filled(card, 14.0, egui::Color32::from_rgba_unmultiplied(11, 13, 10, 220));
+        ui.painter().rect_stroke(card, 14.0, egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink(16.0)));
+        let ui = &mut child;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width() - 250.0);
+                chip(ui, &self.selected, true);
+                ui.add_space(6.0);
+                ui.label(RichText::new(paper.title).size(40.0).color(TEXT));
+                let installed = self.app.is_installed(&self.selected);
+                ui.label(RichText::new(if installed { "Installed · runs in a sandbox" } else { "Not installed · runs in a sandbox" }).size(15.0).color(MUTED));
             });
-        if let Some(prefix) = pick {
-            if let Some(v) = self.versions.iter().find(|v| version_hit(&v.id, &prefix)) {
+            ui.vertical(|ui| {
+                ui.set_min_width(230.0);
+                ui.horizontal(|ui| {
+                    let w = 104.0;
+                    if button(ui, "Vanilla", w, 36.0, self.engine != "horizon") {
+                        self.engine = "vanilla".into();
+                        self.save_settings();
+                    }
+                    if button(ui, "Horizon", w, 36.0, self.engine == "horizon") {
+                        self.engine = "horizon".into();
+                        self.save_settings();
+                    }
+                });
+                ui.add_space(8.0);
+                let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                let label = if live { "Stop" } else if self.engine == "horizon" { "Play Horizon" } else if self.app.is_installed(&self.selected) { "Play" } else { "Install and play" };
+                if button(ui, label, 220.0, 56.0, true) { self.play(); }
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("{} MB memory · {}×{} window", self.ram, self.width, self.height)).size(12.0).color(MUTED));
+            });
+        });
+        if let Some((progress, line)) = self.job_line() {
+            let bar = egui::Rect::from_min_max(egui::pos2(hero.left(), hero.bottom() - 4.0), egui::pos2(hero.left() + hero.width() * progress.clamp(0.0, 1.0), hero.bottom()));
+            ui.painter().rect_filled(bar, 0.0, ACCENT);
+            let _ = line;
+        }
+
+        let strip = egui::Rect::from_min_max(egui::pos2(full.left() + 28.0, hero.bottom() + 12.0), egui::pos2(full.right() - 28.0, full.bottom() - 8.0));
+        let mut strip_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
+        let ui = &mut strip_ui;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("COLLECTIONS").size(12.0).color(ACCENT));
+            ui.add_space(12.0);
+            if button(ui, "Previous", 96.0, 32.0, false) && self.film > 0 { self.film -= 1; }
+            if button(ui, "Next", 72.0, 32.0, false) { self.film += 1; }
+        });
+        ui.add_space(8.0);
+        let papers = wallpapers::all();
+        let visible = 5;
+        if self.film + visible > papers.len() { self.film = papers.len().saturating_sub(visible); }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            for paper in papers.iter().skip(self.film).take(visible) {
+                let on = paper.prefixes.iter().any(|p| version_hit(&self.selected, p));
+                ui.vertical(|ui| {
+                    let size = egui::vec2(150.0, 96.0);
+                    if let Some(tex) = self.papers.get(paper.title) {
+                        let img = ui.add(egui::Image::from_texture((tex.id(), tex.size_vec2())).fit_to_exact_size(size).sense(Sense::click()));
+                        let stroke = if on { egui::Stroke::new(2.0, ACCENT) } else { egui::Stroke::new(1.0, BORDER) };
+                        ui.painter().rect_stroke(img.rect, 8.0, stroke, egui::StrokeKind::Inside);
+                        if img.clicked() { self.select_paper(paper); }
+                        img.on_hover_text(paper.title);
+                    } else {
+                        let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+                        ui.painter().rect_filled(r, 8.0, SURFACE);
+                    }
+                    ui.label(RichText::new(paper.title).size(12.0).color(MUTED));
+                });
+            }
+        });
+    }
+
+    fn select_paper(&mut self, paper: &Paper) {
+        if let Some(prefix) = paper.prefixes.first() {
+            if let Some(v) = self.versions.iter().find(|v| version_hit(&v.id, prefix)) {
                 self.selected = v.id.clone();
                 self.save_settings();
             }
@@ -541,228 +572,426 @@ impl Desktop {
     }
 
     fn page_versions(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap();
-        ui.allocate_rect(outer, Sense::hover());
-        let inner = outer.shrink(18.0);
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+        let outer = ui.available_rect_before_wrap().shrink(28.0);
+        let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
-        ui.label(egui::RichText::new("Versions").size(26.0).strong());
-        ui.label(egui::RichText::new(&self.versions_note).color(DIM));
-        ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.query)
-                    .hint_text("Search versions")
-                    .desired_width(280.0),
-            );
-            if solid_button(ui, "Install selected", 168.0, 32.0, ACCENT, INK) {
-                self.start_install();
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Versions").size(28.0).color(TEXT));
+                ui.label(RichText::new(&self.versions_note).size(14.0).color(MUTED));
+            });
+        });
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            field(ui, &mut self.query, 280.0, "Search versions");
+            ui.add_space(8.0);
+            let _ = button(ui, "Releases", 100.0, 44.0, true);
+            if button(ui, "Snapshots", 110.0, 44.0, self.snapshots) {
+                self.snapshots = !self.snapshots;
+                self.save_settings();
+                spawn_versions(self.app.clone(), self.tx.clone());
+            }
+            if button(ui, "Previews", 104.0, 44.0, self.previews) {
+                self.previews = !self.previews;
+                self.save_settings();
+                spawn_versions(self.app.clone(), self.tx.clone());
             }
         });
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            for p in &mut self.patches {
-                ui.checkbox(&mut p.enabled, &p.title);
-            }
-        });
-        if let Some((progress, line)) = self.job_line() {
-            ui.add(egui::ProgressBar::new(progress.clamp(0.0, 1.0)).text(line));
-        }
-        ui.add_space(8.0);
-        let q = self.query.to_lowercase();
-        let rows: Vec<Ver> = self
-            .versions
-            .iter()
-            .filter(|v| q.is_empty() || v.id.to_lowercase().contains(&q))
-            .take(80)
-            .cloned()
-            .collect();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for v in rows {
-                let paper = wallpapers::for_version(&v.id);
-                let selected = self.selected == v.id;
-                let frame = egui::Frame::new()
-                    .fill(if selected {
-                        egui::Color32::from_rgb(24, 28, 18)
-                    } else {
-                        PANEL
-                    })
-                    .stroke(egui::Stroke::new(1.0_f32, if selected { ACCENT } else { LINE }))
-                    .inner_margin(8.0);
-                frame.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if let Some(tex) = self.papers.get(paper.title) {
-                            ui.add(
-                                egui::Image::from_texture((tex.id(), tex.size_vec2()))
-                                    .fit_to_exact_size(egui::vec2(46.0, 46.0)),
-                            );
-                        } else {
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(46.0, 46.0), Sense::hover());
-                            ui.painter().rect_filled(rect, 0.0, SIDE);
-                        }
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&v.id).strong());
-                            ui.label(
-                                egui::RichText::new(format!("{} · {}", paper.title, v.channel))
-                                    .size(12.0)
-                                    .color(DIM),
-                            );
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if solid_button(
-                                ui,
-                                if v.installed { "Repair" } else { "Install" },
-                                84.0,
-                                30.0,
-                                PANEL,
-                                egui::Color32::WHITE,
-                            ) {
+        ui.add_space(12.0);
+        let list_w = (ui.available_width() - 356.0).max(360.0);
+        let body_h = ui.available_height();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(list_w);
+                ui.set_min_height(body_h);
+                let q = self.query.to_lowercase();
+                let rows: Vec<Ver> = self.versions.iter().filter(|v| q.is_empty() || v.id.to_lowercase().contains(&q)).cloned().collect();
+                egui::ScrollArea::vertical()
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .auto_shrink([false, false])
+                    .max_height(body_h)
+                    .show(ui, |ui| {
+                        for v in rows {
+                            let on = self.selected == v.id;
+                            let paper = wallpapers::for_version(&v.id);
+                            let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), Sense::click());
+                            ui.painter().rect_filled(rect, 8.0, if on { SELECTED } else { SURFACE });
+                            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { ACCENT } else { BORDER }), egui::StrokeKind::Inside);
+                            if let Some(tex) = self.papers.get(paper.title) {
+                                let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 10.0), egui::vec2(44.0, 44.0));
+                                ui.painter().image(tex.id(), thumb, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                            }
+                            ui.painter().text(rect.min + egui::vec2(64.0, 14.0), egui::Align2::LEFT_TOP, &v.id, egui::FontId::proportional(15.0), TEXT);
+                            ui.painter().text(rect.min + egui::vec2(64.0, 34.0), egui::Align2::LEFT_TOP, format!("{} · {}", paper.title, v.channel), egui::FontId::proportional(12.0), MUTED);
+                            let status = if on { "Selected" } else if v.installed { "Installed" } else { "Not installed" };
+                            let accent = on || v.installed;
+                            let chip_w = 108.0;
+                            let chip_r = egui::Rect::from_min_size(egui::pos2(rect.right() - chip_w - 12.0, rect.center().y - 12.0), egui::vec2(chip_w, 24.0));
+                            ui.painter().rect_stroke(chip_r, 12.0, egui::Stroke::new(1.0, if accent { ACCENT } else { BORDER_BTN }), egui::StrokeKind::Inside);
+                            ui.painter().text(chip_r.center(), egui::Align2::CENTER_CENTER, status, egui::FontId::proportional(12.0), if accent { ACCENT } else { MUTED });
+                            if resp.clicked() {
                                 self.selected = v.id.clone();
                                 self.save_settings();
-                                self.start_install();
+                            }
+                            if resp.has_focus() {
+                                ui.painter().rect_stroke(rect.expand(2.0), 8.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside);
                             }
                             ui.add_space(6.0);
-                            if solid_button(ui, "Select", 72.0, 30.0, if selected { ACCENT } else { PANEL }, if selected { INK } else { DIM }) {
-                                self.selected = v.id.clone();
-                                self.save_settings();
-                            }
-                        });
+                        }
                     });
+            });
+            ui.add_space(16.0);
+            ui.vertical(|ui| {
+                ui.set_width(340.0);
+                card(ui, |ui| {
+                    let paper = wallpapers::for_version(&self.selected);
+                    if let Some(tex) = self.papers.get(paper.title) {
+                        ui.add(egui::Image::from_texture((tex.id(), tex.size_vec2())).fit_to_exact_size(egui::vec2(308.0, 160.0)));
+                    }
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(&self.selected).size(22.0).color(TEXT));
+                    ui.label(RichText::new(paper.title).size(14.0).color(MUTED));
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("INSTALL OPTIONS").size(12.0).color(ACCENT));
+                    ui.add_space(4.0);
+                    for p in &mut self.patches {
+                        check(ui, &mut p.enabled, &p.title);
+                    }
+                    ui.add_space(8.0);
+                    if button(ui, &format!("Install {}", self.selected), 308.0, 44.0, true) {
+                        self.start_install();
+                    }
+                    ui.add_space(6.0);
+                    if button(ui, "Set as selected", 308.0, 44.0, false) {
+                        self.save_settings();
+                        self.notice = format!("{} selected", self.selected);
+                    }
+                    if let Some((progress, line)) = self.job_line() {
+                        ui.add_space(8.0);
+                        ui.add(egui::ProgressBar::new(progress.clamp(0.0, 1.0)).text(line));
+                    }
                 });
-                ui.add_space(6.0);
-            }
+            });
         });
     }
 
     fn page_mods(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap();
-        ui.allocate_rect(outer, Sense::hover());
-        let inner = outer.shrink(18.0);
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+        let outer = ui.available_rect_before_wrap().shrink(28.0);
+        let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
-        ui.label(egui::RichText::new("Mods").size(26.0).strong());
-        ui.label(egui::RichText::new("Jars in the Rus mods folder. Enabled ones are staged when you play.").color(DIM));
+        ui.label(RichText::new("Mods").size(28.0).color(TEXT));
+        ui.label(RichText::new("Enabled jars are staged into the instance when you play.").size(15.0).color(MUTED));
         ui.add_space(12.0);
-        group(ui, |ui| {
-            if self.mods.is_empty() {
-                ui.label(egui::RichText::new("No mods yet").size(18.0).strong());
-                ui.add_space(4.0);
-                ui.label("Drop a .jar into this folder.");
-                ui.add_space(6.0);
-                ui.monospace(self.app.p("mods").display().to_string());
-            } else {
-                for (name, enabled, size) in self.mods.clone() {
+        ui.horizontal(|ui| {
+            if button(ui, "Open folder", 140.0, 44.0, false) {
+                if let Err(e) = crate::dialog::open_dir(&self.app.p("mods")) { self.notice = e; }
+            }
+            ui.add_space(8.0);
+            if button(ui, "Add .jar", 120.0, 44.0, true) {
+                if let Some(path) = crate::dialog::pick_file("Add a mod", "*.jar") {
+                    match crate::mods::add_path(&self.app, &path) {
+                        Ok(n) => self.notice = format!("Added {n}"),
+                        Err(e) => self.notice = e,
+                    }
+                    spawn_mods(self.app.clone(), self.tx.clone());
+                } else {
+                    self.notice = "Drop a .jar here, or install zenity to browse.".into();
+                }
+            }
+        });
+        ui.add_space(12.0);
+        let (zone, zresp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), Sense::click());
+        let hover = zresp.hovered() || ui.input(|i| !i.raw.hovered_files.is_empty());
+        ui.painter().rect_filled(zone, 12.0, if hover { SURFACE2 } else { SURFACE });
+        dash_rect(ui, zone);
+        ui.painter().text(zone.center() + egui::vec2(0.0, -16.0), egui::Align2::CENTER_CENTER, "Drop .jar files here", egui::FontId::proportional(18.0), TEXT);
+        ui.painter().text(zone.center() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Choose files", egui::FontId::proportional(14.0), ACCENT);
+        if zresp.clicked() {
+            if let Some(path) = crate::dialog::pick_file("Add a mod", "*.jar") {
+                let _ = crate::mods::add_path(&self.app, &path);
+                spawn_mods(self.app.clone(), self.tx.clone());
+            }
+        }
+        ui.add_space(12.0);
+        let enabled = self.mods.iter().filter(|m| m.1).count();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(self.app.p("mods").display().to_string()).size(13.0).color(MUTED));
+            ui.add_space(8.0);
+            if button(ui, "Copy path", 110.0, 36.0, false) {
+                ui.output_mut(|o| o.copied_text = self.app.p("mods").display().to_string());
+                self.notice = "Path copied".into();
+            }
+            ui.add_space(12.0);
+            ui.label(RichText::new(format!("{} mods · {enabled} enabled", self.mods.len())).size(13.0).color(MUTED));
+        });
+        ui.add_space(8.0);
+        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui, |ui| {
+            for (name, on, size) in self.mods.clone() {
+                card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let mut on = enabled;
-                        if ui.checkbox(&mut on, &name).changed() {
+                        let mut enabled = on;
+                        if check(ui, &mut enabled, &name) {
                             let _ = crate::mods::toggle(&self.app, &name);
                             spawn_mods(self.app.clone(), self.tx.clone());
                         }
-                        ui.label(egui::RichText::new(format_bytes(size)).color(MUTED));
+                        ui.label(RichText::new(format_bytes(size)).size(12.0).color(MUTED));
+                        if button(ui, "Remove", 90.0, 36.0, false) {
+                            let _ = crate::mods::remove(&self.app, &name);
+                            spawn_mods(self.app.clone(), self.tx.clone());
+                        }
                     });
-                }
+                });
+                ui.add_space(6.0);
             }
         });
     }
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap();
-        ui.allocate_rect(outer, Sense::hover());
-        let inner = outer.shrink(18.0);
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+        let outer = ui.available_rect_before_wrap().shrink(28.0);
+        let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
-        ui.label(egui::RichText::new("Settings").size(26.0).strong());
+        ui.label(RichText::new("Settings").size(28.0).color(TEXT));
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                group(ui, |ui| {
-                    ui.set_min_width(420.0);
-                    ui.label(egui::RichText::new("ACCOUNT").size(11.0).color(ACCENT));
-                    ui.add_space(6.0);
-                    ui.label("Username");
-                    if ui.text_edit_singleline(&mut self.username).changed() {
-                        self.save_settings();
-                    }
+                ui.set_width(ui.available_width() - 300.0);
+                card(ui, |ui| {
+                    ui.label(RichText::new("PROFILE").size(12.0).color(ACCENT));
                     ui.add_space(8.0);
-                    ui.label("Skin");
                     ui.horizontal(|ui| {
-                        for (id, label) in [("preset:steve", "Steve"), ("preset:alex", "Alex")] {
-                            if solid_button(ui, label, 88.0, 30.0, if self.skin == id { ACCENT } else { PANEL }, if self.skin == id { INK } else { DIM }) {
-                                self.skin = id.into();
-                                self.save_settings();
+                        ui.vertical(|ui| {
+                            ui.set_width(ui.available_width() - 280.0);
+                            ui.label(RichText::new("Username").size(14.0).color(TEXT));
+                            if field(ui, &mut self.username, ui.available_width(), "Player").changed() { self.save_settings(); }
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Skin").size(14.0).color(TEXT));
+                            ui.horizontal(|ui| {
+                                if button(ui, "Steve", 84.0, 40.0, self.skin == "preset:steve") {
+                                    self.skin = "preset:steve".into();
+                                    self.preview.arms = ArmModel::Classic;
+                                    self.preview.invalidate();
+                                    self.avatar_key.clear();
+                                    self.save_settings();
+                                }
+                                if button(ui, "Alex", 84.0, 40.0, self.skin == "preset:alex") {
+                                    self.skin = "preset:alex".into();
+                                    self.preview.arms = ArmModel::Slim;
+                                    self.preview.invalidate();
+                                    self.avatar_key.clear();
+                                    self.save_settings();
+                                }
+                                if button(ui, "Import skin…", 130.0, 40.0, false) {
+                                    if let Some(path) = crate::dialog::pick_file("Import skin", "*.png") {
+                                        self.import_path("skin", &path);
+                                    } else {
+                                        self.import_error = "No file chosen. You can also drop a PNG here.".into();
+                                    }
+                                }
+                            });
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Cape").size(14.0).color(TEXT));
+                            ui.horizontal(|ui| {
+                                if button(ui, "Rus", 84.0, 40.0, self.cape == "preset:rus") {
+                                    self.cape = "preset:rus".into();
+                                    self.preview.invalidate();
+                                    self.save_settings();
+                                }
+                                if button(ui, "None", 84.0, 40.0, self.cape == "preset:none" || self.cape.is_empty()) {
+                                    self.cape = "preset:none".into();
+                                    self.preview.invalidate();
+                                    self.save_settings();
+                                }
+                                if button(ui, "Import cape…", 130.0, 40.0, false) {
+                                    if let Some(path) = crate::dialog::pick_file("Import cape", "*.png") {
+                                        self.import_path("cape", &path);
+                                    } else {
+                                        self.import_error = "Cape must be a 64×32 PNG.".into();
+                                    }
+                                }
+                            });
+                            if !self.import_error.is_empty() {
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(&self.import_error).size(13.0).color(ERR));
                             }
-                            ui.add_space(6.0);
-                        }
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Local account only. No Microsoft login.").size(13.0).color(MUTED));
+                            ui.label(RichText::new(crate::state::offline_uuid(&self.username)).size(13.0).color(MUTED).monospace());
+                        });
+                        ui.vertical(|ui| {
+                            let skin = self.skin_image();
+                            let cape = self.cape_image();
+                            if let Some(skin) = skin.as_ref() {
+                                let slim = self.detected_slim();
+                                self.preview.show(ui, skin, cape.as_ref(), slim);
+                                if matches!(self.preview.arms, ArmModel::Classic | ArmModel::Slim) {
+                                    self.save_settings();
+                                }
+                            } else {
+                                ui.label(RichText::new("Skin file missing").color(ERR));
+                            }
+                        });
                     });
-                    ui.label("Cape");
-                    if solid_button(ui, "Rus", 88.0, 30.0, if self.cape == "preset:rus" { ACCENT } else { PANEL }, INK) {
-                        self.cape = "preset:rus".into();
-                        self.save_settings();
-                    }
-                    ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Local account only. No Microsoft login.").color(DIM));
-                    ui.label(egui::RichText::new(crate::state::offline_uuid(&self.username)).size(12.0).color(MUTED));
                 });
             });
-            ui.add_space(12.0);
+            ui.add_space(16.0);
             ui.vertical(|ui| {
-                group(ui, |ui| {
-                    ui.set_min_width(420.0);
-                    ui.label(egui::RichText::new("GAME").size(11.0).color(ACCENT));
-                    ui.add_space(6.0);
-                    ui.label(format!("Memory  {} MB", self.ram));
-                    if ui.add(egui::Slider::new(&mut self.ram, 512..=16384).step_by(256.0)).changed() {
-                        self.save_settings();
-                    }
+                ui.set_min_width(280.0);
+                card(ui, |ui| {
+                    ui.label(RichText::new("GAME").size(12.0).color(ACCENT));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label("Game window");
-                        let mut w = self.width as i32;
-                        let mut h = self.height as i32;
-                        if ui.add(egui::DragValue::new(&mut w).range(640..=3840)).changed() {
-                            self.width = w as u32;
-                            self.save_settings();
+                        ui.label(RichText::new("Memory").size(14.0).color(TEXT));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(format!("{} MB", self.ram)).size(14.0).color(TEXT));
+                        });
+                    });
+                    if slider(ui, &mut self.ram, 512, 16384) { self.save_settings(); }
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Game window").size(14.0).color(TEXT));
+                    ui.horizontal(|ui| {
+                        let mut w = self.width.to_string();
+                        let mut h = self.height.to_string();
+                        if field(ui, &mut w, 90.0, "1280").changed() {
+                            if let Ok(n) = w.parse::<u32>() { self.width = n.clamp(640, 3840); self.save_settings(); }
                         }
-                        ui.label("×");
-                        if ui.add(egui::DragValue::new(&mut h).range(480..=2160)).changed() {
-                            self.height = h as u32;
-                            self.save_settings();
+                        ui.label(RichText::new("×").color(MUTED));
+                        if field(ui, &mut h, 90.0, "720").changed() {
+                            if let Ok(n) = h.parse::<u32>() { self.height = n.clamp(480, 2160); self.save_settings(); }
                         }
                     });
                     ui.add_space(8.0);
-                    if ui.checkbox(&mut self.snapshots, "Show snapshots from series 26 up").changed() {
+                    if check(ui, &mut self.snapshots, "Show snapshots (series 26 and up)") {
                         self.save_settings();
                         spawn_versions(self.app.clone(), self.tx.clone());
                     }
-                    if ui.checkbox(&mut self.previews, "Show previews from series 26 up").changed() {
+                    if check(ui, &mut self.previews, "Show previews (series 26 and up)") {
                         self.save_settings();
                         spawn_versions(self.app.clone(), self.tx.clone());
                     }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(self.app.dir.display().to_string()).size(12.0).color(MUTED));
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Data folder").size(14.0).color(TEXT));
+                    ui.label(RichText::new(self.app.dir.display().to_string()).size(12.0).color(MUTED));
+                    if button(ui, "Open", 88.0, 40.0, false) {
+                        if let Err(e) = crate::dialog::open_dir(&self.app.dir) { self.notice = e; }
+                    }
                 });
             });
         });
     }
 }
 
-fn group(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new()
-        .fill(PANEL)
-        .stroke(egui::Stroke::new(1.0_f32, LINE))
-        .inner_margin(14.0)
-        .show(ui, add);
+fn account_chip(ui: &mut egui::Ui, avatar: Option<&egui::TextureHandle>, name: &str) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), Sense::hover());
+    ui.painter().rect_filled(rect, 12.0, SURFACE2);
+    ui.painter().rect_stroke(rect, 12.0, egui::Stroke::new(1.0, BORDER_BTN), egui::StrokeKind::Inside);
+    if let Some(tex) = avatar {
+        let face = egui::Rect::from_min_size(rect.min + egui::vec2(8.0, 8.0), egui::vec2(40.0, 40.0));
+        ui.painter().image(tex.id(), face, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+    }
+    ui.painter().text(rect.min + egui::vec2(56.0, 12.0), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(15.0), TEXT);
+    ui.painter().text(rect.min + egui::vec2(56.0, 32.0), egui::Align2::LEFT_TOP, "Local account", egui::FontId::proportional(12.0), MUTED);
+}
+
+fn nav_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::click());
+    if on || resp.hovered() { ui.painter().rect_filled(rect, 8.0, SELECTED); }
+    let mark = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 18.0), egui::vec2(8.0, 8.0));
+    ui.painter().rect_filled(mark, 1.0, if on { ACCENT } else { MARKER_OFF });
+    ui.painter().text(rect.left_center() + egui::vec2(28.0, 0.0), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(15.0), if on { TEXT } else { MUTED });
+    if resp.has_focus() { ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Inside); }
+    resp.clicked()
+}
+
+fn button(ui: &mut egui::Ui, label: &str, width: f32, height: f32, primary: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
+    let fill = if primary { ACCENT } else if resp.hovered() { SELECTED } else { SURFACE2 };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    if !primary { ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, BORDER_BTN), egui::StrokeKind::Inside); }
+    if resp.has_focus() { ui.painter().rect_stroke(rect.expand(2.0), 8.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside); }
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(14.0), if primary { ON_ACCENT } else { TEXT });
+    resp.clicked()
+}
+
+fn chip(ui: &mut egui::Ui, label: &str, on: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(72.0, 26.0), Sense::hover());
+    ui.painter().rect_stroke(rect, 12.0, egui::Stroke::new(1.0, if on { ACCENT } else { BORDER_BTN }), egui::StrokeKind::Inside);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), if on { ACCENT } else { MUTED });
+}
+
+fn field(ui: &mut egui::Ui, text: &mut String, width: f32, hint: &str) -> egui::Response {
+    ui.add(
+        egui::TextEdit::singleline(text)
+            .hint_text(hint)
+            .desired_width(width)
+            .min_size(egui::vec2(width, 44.0))
+            .margin(egui::vec2(10.0, 12.0)),
+    )
+}
+
+fn check(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(180.0), 32.0), Sense::click());
+    let box_r = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 6.0), egui::vec2(18.0, 18.0));
+    ui.painter().rect_filled(box_r, 3.0, BG);
+    ui.painter().rect_stroke(box_r, 3.0, egui::Stroke::new(1.5, if *on { ACCENT } else { BORDER_INPUT }), egui::StrokeKind::Inside);
+    if *on { ui.painter().rect_filled(box_r.shrink(4.0), 2.0, ACCENT); }
+    ui.painter().text(rect.min + egui::vec2(28.0, 8.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional(14.0), TEXT);
+    if resp.has_focus() { ui.painter().rect_stroke(box_r.expand(2.0), 3.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside); }
+    if resp.clicked() { *on = !*on; true } else { false }
+}
+
+fn slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32) -> bool {
+    let width = ui.available_width().max(160.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 28.0), Sense::click_and_drag());
+    let track = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.center().y - 3.0), egui::pos2(rect.right(), rect.center().y + 3.0));
+    ui.painter().rect_filled(track, 3.0, BORDER_INPUT);
+    let t = (*value as f32 - min as f32) / (max as f32 - min as f32);
+    let fill = egui::Rect::from_min_max(track.min, egui::pos2(track.left() + track.width() * t, track.bottom()));
+    ui.painter().rect_filled(fill, 3.0, ACCENT);
+    let hx = track.left() + track.width() * t;
+    ui.painter().circle_filled(egui::pos2(hx, track.center().y), 8.0, ACCENT);
+    ui.painter().circle_stroke(egui::pos2(hx, track.center().y), 8.0, egui::Stroke::new(2.0, ON_ACCENT));
+    if (resp.dragged() || resp.clicked()) && resp.interact_pointer_pos().is_some() {
+        let p = resp.interact_pointer_pos().unwrap();
+        let nt = ((p.x - track.left()) / track.width()).clamp(0.0, 1.0);
+        let raw = min as f32 + nt * (max - min) as f32;
+        *value = ((raw / 256.0).round() * 256.0) as u32;
+        *value = (*value).clamp(min, max);
+        return true;
+    }
+    false
+}
+
+fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new().fill(SURFACE).stroke(egui::Stroke::new(1.0, BORDER)).corner_radius(12.0).inner_margin(14.0).show(ui, add);
+}
+
+fn dash_rect(ui: &egui::Ui, rect: egui::Rect) {
+    let color = BORDER_INPUT;
+    let step = 8.0;
+    let mut x = rect.left();
+    while x < rect.right() {
+        let x2 = (x + 5.0).min(rect.right());
+        ui.painter().line_segment([egui::pos2(x, rect.top()), egui::pos2(x2, rect.top())], egui::Stroke::new(1.5, color));
+        ui.painter().line_segment([egui::pos2(x, rect.bottom()), egui::pos2(x2, rect.bottom())], egui::Stroke::new(1.5, color));
+        x += step;
+    }
+    let mut y = rect.top();
+    while y < rect.bottom() {
+        let y2 = (y + 5.0).min(rect.bottom());
+        ui.painter().line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.left(), y2)], egui::Stroke::new(1.5, color));
+        ui.painter().line_segment([egui::pos2(rect.right(), y), egui::pos2(rect.right(), y2)], egui::Stroke::new(1.5, color));
+        y += step;
+    }
 }
 
 fn drag_block(ui: &mut egui::Ui, height: f32, paint: impl FnOnce(&mut egui::Ui, egui::Rect)) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click_and_drag());
     paint(ui, rect);
-    if resp.drag_started() {
-        ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
-    }
-    if resp.double_clicked() {
-        toggle_max(ui.ctx());
-    }
+    if resp.drag_started() { ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag); }
+    if resp.double_clicked() { toggle_max(ui.ctx()); }
 }
 
 fn toggle_max(ctx: &egui::Context) {
@@ -770,74 +999,22 @@ fn toggle_max(ctx: &egui::Context) {
     ctx.send_viewport_cmd(ViewportCommand::Maximized(!maxed));
 }
 
-fn nav_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    let width = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 40.0), Sense::click());
-    let fill = if on {
-        egui::Color32::from_rgb(22, 26, 16)
-    } else if resp.hovered() {
-        egui::Color32::from_rgb(22, 22, 22)
-    } else {
-        SIDE
-    };
-    ui.painter().rect_filled(rect, 0.0, fill);
-    if on {
-        let bar = egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + 3.0, rect.max.y));
-        ui.painter().rect_filled(bar, 0.0, ACCENT);
-    }
-    ui.painter().text(
-        rect.left_center() + egui::vec2(16.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(15.0),
-        if on { egui::Color32::WHITE } else { DIM },
-    );
-    resp.clicked()
-}
-
-fn engine_button(ui: &mut egui::Ui, label: &str, width: f32, on: bool) -> bool {
-    solid_button(ui, label, width, 30.0, if on { ACCENT } else { PANEL }, if on { INK } else { DIM })
-}
-
-fn solid_button(ui: &mut egui::Ui, label: &str, width: f32, height: f32, fill: egui::Color32, text: egui::Color32) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width.max(64.0), height), Sense::click());
-    let mut bg = fill;
-    if resp.hovered() && fill != ACCENT {
-        bg = egui::Color32::from_rgb(32, 32, 32);
-    }
-    if label == "Exit" && resp.hovered() {
-        bg = egui::Color32::from_rgb(42, 24, 24);
-    }
-    ui.painter().rect_filled(rect, 0.0, bg);
-    ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0_f32, if label == "Exit" && resp.hovered() { EXIT_HOT } else { LINE }), egui::StrokeKind::Inside);
-    let color = if label == "Exit" && resp.hovered() { EXIT_HOT } else { text };
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        egui::FontId::proportional(14.0),
-        color,
-    );
-    resp.clicked()
-}
-
 fn paint_fade(ui: &egui::Ui, rect: egui::Rect) {
-    let fade_top = rect.top() + rect.height() * 0.38;
-    let steps = 18;
-    for i in 0..steps {
-        let t0 = i as f32 / steps as f32;
-        let t1 = (i + 1) as f32 / steps as f32;
-        let y0 = fade_top + (rect.bottom() - fade_top) * t0;
-        let y1 = fade_top + (rect.bottom() - fade_top) * t1;
+    let top = rect.top() + rect.height() * 0.45;
+    for i in 0..14 {
+        let t0 = i as f32 / 14.0;
+        let t1 = (i + 1) as f32 / 14.0;
+        let y0 = top + (rect.bottom() - top) * t0;
+        let y1 = top + (rect.bottom() - top) * t1;
         let band = egui::Rect::from_min_max(egui::pos2(rect.left(), y0), egui::pos2(rect.right(), y1));
-        ui.painter().rect_filled(band, 0.0, egui::Color32::from_black_alpha((t1 * 220.0) as u8));
+        ui.painter().rect_filled(band, 0.0, egui::Color32::from_black_alpha((t1 * 190.0) as u8));
     }
 }
 
 fn paint_frame(ctx: &egui::Context) {
     let rect = ctx.screen_rect();
     ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("frame")))
-        .rect_stroke(rect, 0.0, egui::Stroke::new(1.0_f32, LINE), egui::StrokeKind::Inside);
+        .rect_stroke(rect, 0.0, egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
 }
 
 fn window_edges(ctx: &egui::Context) {
@@ -854,21 +1031,13 @@ fn window_edges(ctx: &egui::Context) {
         (ResizeDirection::West, egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + c), egui::pos2(rect.left() + t, rect.bottom() - c)), CursorIcon::ResizeWest),
         (ResizeDirection::East, egui::Rect::from_min_max(egui::pos2(rect.right() - t, rect.top() + c), egui::pos2(rect.right(), rect.bottom() - c)), CursorIcon::ResizeEast),
     ];
-    egui::Area::new(egui::Id::new("window-edges"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(rect.min)
-        .interactable(true)
-        .show(ctx, |ui| {
-            for (i, (dir, zone, cursor)) in zones.iter().enumerate() {
-                let resp = ui.interact(*zone, egui::Id::new("edge").with(i), Sense::click_and_drag());
-                if resp.hovered() || resp.dragged() {
-                    ui.ctx().set_cursor_icon(*cursor);
-                }
-                if resp.drag_started() {
-                    ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(*dir));
-                }
-            }
-        });
+    egui::Area::new(egui::Id::new("window-edges")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+        for (i, (dir, zone, cursor)) in zones.iter().enumerate() {
+            let resp = ui.interact(*zone, egui::Id::new("edge").with(i), Sense::click_and_drag());
+            if resp.hovered() || resp.dragged() { ui.ctx().set_cursor_icon(*cursor); }
+            if resp.drag_started() { ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(*dir)); }
+        }
+    });
 }
 
 fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
@@ -890,20 +1059,9 @@ fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
 
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "MozillaHeadline".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/MozillaHeadline-600.ttf")).into(),
-    );
-    fonts
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "MozillaHeadline".to_owned());
-    fonts
-        .families
-        .entry(egui::FontFamily::Monospace)
-        .or_default()
-        .insert(0, "MozillaHeadline".to_owned());
+    fonts.font_data.insert("MozillaHeadline".into(), egui::FontData::from_static(include_bytes!("../assets/MozillaHeadline-600.ttf")).into());
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "MozillaHeadline".into());
+    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "MozillaHeadline".into());
     ctx.set_fonts(fonts);
 }
 
@@ -912,20 +1070,33 @@ fn style_ui(ctx: &egui::Context) {
     style.visuals.dark_mode = true;
     style.visuals.panel_fill = BG;
     style.visuals.window_fill = BG;
-    style.visuals.extreme_bg_color = egui::Color32::from_rgb(10, 10, 10);
-    style.visuals.widgets.noninteractive.bg_fill = PANEL;
-    style.visuals.widgets.inactive.bg_fill = PANEL;
-    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(32, 32, 32);
-    style.visuals.override_text_color = Some(egui::Color32::from_rgb(243, 243, 243));
-    style.visuals.selection.bg_fill = egui::Color32::from_rgb(36, 48, 20);
-    let zero = egui::CornerRadius::ZERO;
-    style.visuals.widgets.noninteractive.corner_radius = zero;
-    style.visuals.widgets.inactive.corner_radius = zero;
-    style.visuals.widgets.hovered.corner_radius = zero;
-    style.visuals.widgets.active.corner_radius = zero;
-    style.visuals.widgets.open.corner_radius = zero;
-    style.visuals.window_corner_radius = zero;
-    style.visuals.menu_corner_radius = zero;
+    style.visuals.extreme_bg_color = BG;
+    style.visuals.override_text_color = Some(TEXT);
+    style.visuals.selection.bg_fill = SELECTED;
+    style.visuals.selection.stroke = egui::Stroke::new(2.0, ACCENT);
+    let radius = egui::CornerRadius::same(8);
+    for w in [
+        &mut style.visuals.widgets.noninteractive,
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        w.corner_radius = radius;
+        w.bg_stroke = egui::Stroke::new(1.5, BORDER_INPUT);
+        w.fg_stroke.color = TEXT;
+    }
+    style.visuals.widgets.inactive.weak_bg_fill = SURFACE2;
+    style.visuals.widgets.hovered.weak_bg_fill = SELECTED;
+    style.visuals.widgets.active.bg_fill = ACCENT;
+    style.visuals.widgets.active.weak_bg_fill = ACCENT;
+    style.visuals.widgets.active.fg_stroke.color = ON_ACCENT;
+    style.visuals.window_corner_radius = radius;
+    style.visuals.menu_corner_radius = radius;
+    style.visuals.widgets.inactive.bg_fill = MARKER_OFF;
+    style.spacing.scroll.floating = false;
+    style.spacing.scroll.bar_width = 10.0;
+    style.spacing.scroll.foreground_color = true;
     ctx.set_style(style);
 }
 
@@ -933,20 +1104,13 @@ fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::T
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    let opts = if name == "mark" {
-        egui::TextureOptions::NEAREST
-    } else {
-        egui::TextureOptions::LINEAR
-    };
+    let opts = if name == "mark" || name == "avatar" { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
     Some(ctx.load_texture(name, color, opts))
 }
 
 fn save_png(path: &str, image: &egui::ColorImage) -> Result<(), String> {
-    let img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, image.as_raw().to_vec())
-        .ok_or("bad image")?;
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
+    let img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, image.as_raw().to_vec()).ok_or("bad image")?;
+    if let Some(parent) = std::path::Path::new(path).parent() { let _ = std::fs::create_dir_all(parent); }
     img.save(path).map_err(|e| e.to_string())
 }
 
@@ -955,36 +1119,25 @@ fn version_hit(id: &str, prefix: &str) -> bool {
 }
 
 fn format_bytes(n: u64) -> String {
-    if n < 1024 {
-        format!("{n} B")
-    } else if n < 1024 * 1024 {
-        format!("{} KB", n / 1024)
-    } else {
-        format!("{:.1} MB", n as f64 / 1_048_576.0)
-    }
+    if n < 1024 { format!("{n} B") } else if n < 1024 * 1024 { format!("{} KB", n / 1024) } else { format!("{:.1} MB", n as f64 / 1_048_576.0) }
 }
 
 fn spawn_versions(app: Arc<App>, tx: Sender<Msg>) {
-    std::thread::spawn(move || {
-        match crate::mojang::version_list(&app) {
-            Ok(v) => {
-                let mut out = Vec::new();
-                if let Some(arr) = v.get("versions").and_then(|x| x.as_array()) {
-                    for item in arr {
-                        out.push(Ver {
-                            id: item.get("id").and_then(|x| x.as_str()).unwrap_or("").into(),
-                            channel: item.get("channel").and_then(|x| x.as_str()).unwrap_or("").into(),
-                            released: item.get("released").and_then(|x| x.as_str()).unwrap_or("").into(),
-                            installed: item.get("installed").and_then(|x| x.as_bool()).unwrap_or(false),
-                        });
-                    }
+    std::thread::spawn(move || match crate::mojang::version_list(&app) {
+        Ok(v) => {
+            let mut out = Vec::new();
+            if let Some(arr) = v.get("versions").and_then(|x| x.as_array()) {
+                for item in arr {
+                    out.push(Ver {
+                        id: item.get("id").and_then(|x| x.as_str()).unwrap_or("").into(),
+                        channel: item.get("channel").and_then(|x| x.as_str()).unwrap_or("").into(),
+                        installed: item.get("installed").and_then(|x| x.as_bool()).unwrap_or(false),
+                    });
                 }
-                let _ = tx.send(Msg::Versions(out));
             }
-            Err(e) => {
-                let _ = tx.send(Msg::VersionsErr(e));
-            }
+            let _ = tx.send(Msg::Versions(out));
         }
+        Err(e) => { let _ = tx.send(Msg::VersionsErr(e)); }
     });
 }
 
@@ -1009,10 +1162,7 @@ fn spawn_papers(dir: std::path::PathBuf, tx: Sender<Msg>) {
     std::thread::spawn(move || {
         for paper in wallpapers::all() {
             if let Ok(bytes) = wallpapers::load_cached(&dir, paper) {
-                let _ = tx.send(Msg::Paper {
-                    title: paper.title.into(),
-                    bytes,
-                });
+                let _ = tx.send(Msg::Paper { title: paper.title.into(), bytes });
             }
         }
     });

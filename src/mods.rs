@@ -48,6 +48,28 @@ pub fn list(app: &App) -> serde_json::Value {
     serde_json::json!({ "dir": dir.to_string_lossy(), "mods": mods })
 }
 
+pub fn add_path(app: &App, path: &Path) -> Result<String, String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let clean: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '+' { c } else { '_' })
+        .collect();
+    if !clean.to_ascii_lowercase().ends_with(".jar") {
+        return Err("Only .jar mods are supported".into());
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    if bytes.len() < 22 || &bytes[0..2] != b"PK" {
+        return Err("Not a valid jar".into());
+    }
+    let dir = library_dir(app);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::write(dir.join(&clean), bytes).map_err(|e| e.to_string())?;
+    Ok(clean)
+}
+
 pub fn add(app: &App, file_name: &str, data_url: &str) -> Result<String, String> {
     use base64::Engine;
     let clean: String = file_name

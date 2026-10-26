@@ -4,6 +4,7 @@
 //! serve a web page.
 
 mod desktop;
+mod dialog;
 mod horizon;
 mod install;
 mod java;
@@ -11,8 +12,11 @@ mod mods;
 mod mojang;
 mod net;
 mod play;
+mod preview3d;
+mod raster;
 mod sandbox;
 mod skin;
+mod skinmodel;
 mod state;
 mod wallpapers;
 

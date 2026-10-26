@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  Four tabs, a local account, and the official collection wallpaper for each version.<br>
-  Rus is its own window. No title bar, no browser, no local page. Exit is a button in the app.<br>
+  Four tabs, a local account, a 3D skin preview, and the official collection wallpaper for each version.<br>
+  Rus is its own window. No title bar, no browser, no local page. Exit is a small button in the app.<br>
   <i>Not affiliated with Mojang or Microsoft.</i>
 </p>
 
@@ -43,17 +43,17 @@ These pictures are the Rus window itself, captured from the native program (`rus
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/versions.png" alt="Versions tab with each release beside its collection wallpaper, and install patches that can be turned off" width="100%"><p align="center"><sub><b>Versions.</b> Releases, with the collection art for that drop. Snapshots stay hidden until Settings turns them on.</sub></p></td>
-<td width="50%" valign="top"><img src="docs/settings.png" alt="Settings tab with username, memory, window size, snapshot toggle, Steve skin and the Rus cape" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, skin and cape. No Microsoft login.</sub></p></td>
+<td width="50%" valign="top"><img src="docs/versions.png" alt="Versions tab with each release beside its collection wallpaper, and install patches that can be turned off" width="100%"><p align="center"><sub><b>Versions.</b> Search, filter, and a scrolling list. Snapshots stay hidden until Settings turns them on.</sub></p></td>
+<td width="50%" valign="top"><img src="docs/settings.png" alt="Settings tab with username, memory, window size, snapshot toggle, Steve skin and the Rus cape" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, and a 3D skin preview. No Microsoft login.</sub></p></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/mods.png" alt="Mods tab, empty, pointing at the Rus mods folder" width="100%"><p align="center"><sub><b>Mods.</b> Jars in the Rus mods folder. Enabled ones are staged when you play.</sub></p></td>
+<td colspan="2"><img src="docs/mods.png" alt="Mods tab, empty, pointing at the Rus mods folder" width="100%"><p align="center"><sub><b>Mods.</b> Drop a .jar, or add one from disk. Enabled ones are staged when you play.</sub></p></td>
 </tr>
 </table>
 
 ## Why Rus
 
-- **A window, not a page.** Native [egui](https://github.com/emilk/egui), with the system title bar removed. Drag the sidebar or the wallpaper to move it. **Exit** closes it.
+- **A window, not a page.** Native [egui](https://github.com/emilk/egui), with the system title bar removed. Drag the sidebar or the wallpaper to move it. **Minimize** and **Exit** sit in the app.
 - **Your account stays local.** Username, Steve or Alex, and the Rus cape. The offline UUID is the vanilla one (`OfflinePlayer:<name>`).
 - **The collection is in the launcher.** Each version shows the official wallpaper for its drop, fetched from [minecraft.net/collectibles](https://www.minecraft.net/en-us/collectibles) into your data folder. The art is not bundled.
 - **Installs survive a dropped connection.** Downloads are 2 MB parts. A failed or corrupt part is fetched again. Finished parts stay.
@@ -65,11 +65,11 @@ These pictures are the Rus window itself, captured from the native program (`rus
 | Area | What you get |
 |---|---|
 | **Window** | Home, Versions, Mods, Settings. Left sidebar. English. [Mozilla Headline](https://github.com/mozilla/mozilla-type-family). |
-| **Account** | Local only. Default skin Steve. One sample cape, Rus, in the real 64×32 cape layout. |
+| **Account** | Local only. Default skin Steve. Import a PNG skin or cape. One sample cape, Rus, in the real 64×32 layout. A CPU 3D preview, classic or slim. |
 | **Versions** | Releases always. Snapshots and previews from series 26 up, hidden until Settings turns them on. |
 | **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
 | **Play** | Vanilla Java client, or Horizon for 26.3. Both start outside the browser, inside the sandbox. |
-| **Mods** | A folder of jars. Toggle them. They are staged into the instance when you play. |
+| **Mods** | A folder of jars. Drop a `.jar` on the window, or add one from disk. Toggle, copy the path, or delete. Enabled ones are staged when you play. |
 
 You need your own copy of Minecraft. Rus downloads it from Mojang into `~/.rus` on Linux, or `%APPDATA%\Rus` on Windows.
 
@@ -83,7 +83,11 @@ src/mojang.rs      version manifest
 src/install.rs     patch pipeline
 src/net.rs         part-by-part downloads
 src/java.rs        Temurin JRE
-src/skin.rs        offline skin pack and the Rus cape
+src/skin.rs        offline skin pack, import, and the Rus cape
+src/skinmodel.rs   classic and slim boxes, face avatar
+src/raster.rs      CPU skin preview
+src/preview3d.rs   drag, zoom, and walk
+src/dialog.rs      native file picker and folder open
 src/mods.rs        mod library
 src/play.rs        Java command line
 src/sandbox.rs     bubblewrap jail, or a Windows job object
@@ -117,8 +121,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.3.0/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.3.0/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.4.0/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.4.0/rus-windows-x64.exe) |
 
 Linux:
 

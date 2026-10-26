@@ -434,6 +434,22 @@ pub fn save_texture(app: &App, kind: &str, name: &str, data_url: &str) -> Result
     Ok(format!("file:{file}"))
 }
 
+pub fn import_texture(app: &App, kind: &str, bytes: &[u8]) -> Result<String, String> {
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| format!("Not a PNG: {e}"))?
+        .to_rgba8();
+    match kind {
+        "skin" => crate::skinmodel::prepare_skin(&img)?,
+        "cape" => crate::skinmodel::prepare_cape(&img)?,
+        _ => return Err("unknown texture".into()),
+    };
+    let dir = if kind == "cape" { capes_dir(app) } else { skins_dir(app) };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = format!("import-{}.png", crate::state::now_ms());
+    fs::write(dir.join(&name), bytes).map_err(|e| e.to_string())?;
+    Ok(format!("file:{name}"))
+}
+
 pub fn list(app: &App) -> serde_json::Value {
     let read = |dir: PathBuf| -> Vec<serde_json::Value> {
         let mut out = Vec::new();
