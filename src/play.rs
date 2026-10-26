@@ -100,9 +100,9 @@ pub fn build_command_join(app: &App, id: &str, server: Option<&str>) -> Result<(
         .and_then(|j| j.get("majorVersion"))
         .and_then(|m| m.as_u64())
         .unwrap_or(0) as u32;
-    let javaw = java::resolve(app, component, major).ok_or_else(|| {
+    let javaw = java::gui_exe(&java::resolve(app, component, major).ok_or_else(|| {
         format!("Java {major} was not found. Reinstall the version or set a Java path in Settings")
-    })?;
+    })?);
 
     let uuid = offline_uuid(&settings.username);
     let mut vars: HashMap<String, String> = HashMap::new();
@@ -287,12 +287,22 @@ pub fn build_command_join(app: &App, id: &str, server: Option<&str>) -> Result<(
             cmd.stdout(Stdio::null()).stderr(Stdio::null());
         }
     }
+    hide_console(&mut cmd);
+    cmd.stdin(Stdio::null());
+    Ok((cmd, javaw))
+}
+
+pub fn hide_console(cmd: &mut Command) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        // CREATE_NO_WINDOW — do not open a console for this process.
+        cmd.creation_flags(0x08000000);
     }
-    Ok((cmd, javaw))
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = cmd;
+    }
 }
 
 fn split_server(addr: &str) -> (String, Option<String>) {
@@ -346,6 +356,31 @@ pub fn launch_join(app: &App, id: &str, server: Option<&str>) -> Result<serde_js
     }))
 }
 
+fn note_exit(version: String, started: u128) {
+    let elapsed = crate::state::now_ms().saturating_sub(started);
+    if elapsed > 0 {
+        finished().lock().unwrap().push((version, elapsed));
+    }
+}
+
+fn finished() -> &'static Mutex<Vec<(String, u128)>> {
+    static FINISHED: OnceLock<Mutex<Vec<(String, u128)>>> = OnceLock::new();
+    FINISHED.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub fn drain_finished() -> Vec<(String, u128)> {
+    std::mem::take(&mut *finished().lock().unwrap())
+}
+
+pub fn live_ms_for(version: &str) -> Option<u128> {
+    let r = running().lock().unwrap();
+    let p = r.as_ref()?;
+    if p.version != version {
+        return None;
+    }
+    Some(crate::state::now_ms().saturating_sub(p.started))
+}
+
 pub fn status() -> serde_json::Value {
     let mut r = running().lock().unwrap();
     if let Some(p) = r.as_mut() {
@@ -360,7 +395,10 @@ pub fn status() -> serde_json::Value {
                 })
             }
             _ => {
+                let version = p.version.clone();
+                let started = p.started;
                 *r = None;
+                note_exit(version, started);
             }
         }
     }
@@ -372,6 +410,7 @@ pub fn kill() -> Result<(), String> {
     let mut r = running().lock().unwrap();
     if let Some(p) = r.as_mut() {
         let _ = p.child.kill();
+        note_exit(p.version.clone(), p.started);
     }
     *r = None;
     Ok(())

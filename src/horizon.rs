@@ -247,6 +247,8 @@ fn run(app: &App) -> Result<(), String> {
             cmd.stdout(Stdio::from(f)).stderr(Stdio::from(err));
         }
     }
+    crate::play::hide_console(&mut cmd);
+    cmd.stdin(Stdio::null());
     let child = cmd.spawn().map_err(|e| format!("Failed to start Horizon: {e}"))?;
     crate::sandbox::attach(&child);
     let pid = child.id();

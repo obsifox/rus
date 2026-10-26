@@ -88,6 +88,7 @@ struct Desktop {
     icon_neoforge: Option<egui::TextureHandle>,
     icon_optifine: Option<egui::TextureHandle>,
     loader: String,
+    playtime: HashMap<String, u128>,
     servers: Vec<ServerEntry>,
     server_icons: HashMap<String, egui::TextureHandle>,
     server_name: String,
@@ -122,8 +123,8 @@ struct Desktop {
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
     let viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1280.0, 720.0])
-        .with_min_inner_size([1100.0, 640.0])
+        .with_inner_size([960.0, 540.0])
+        .with_min_inner_size([800.0, 450.0])
         .with_decorations(false)
         .with_resizable(true)
         .with_title("Rus")
@@ -169,6 +170,7 @@ impl Desktop {
             icon_neoforge: load_texture(&cc.egui_ctx, "neoforge", include_bytes!("../assets/loader-neoforge.png")),
             icon_optifine: load_texture(&cc.egui_ctx, "optifine", include_bytes!("../assets/loader-optifine.png")),
             loader: if settings.loader.is_empty() { "vanilla".into() } else { settings.loader },
+            playtime: load_playtime(&app),
             servers: app.load_servers(),
             server_icons: HashMap::new(),
             server_name: String::new(),
@@ -262,6 +264,22 @@ impl Desktop {
     }
 
     fn paper_for(&self, id: &str) -> &'static Paper { wallpapers::for_version(id) }
+
+    fn settle_playtime(&mut self) {
+        let finished = crate::play::drain_finished();
+        if finished.is_empty() {
+            return;
+        }
+        for (version, ms) in finished {
+            *self.playtime.entry(version).or_insert(0) += ms;
+        }
+        save_playtime(&self.app, &self.playtime);
+    }
+
+    fn shown_play_ms(&self) -> u128 {
+        let stored = self.playtime.get(&self.selected).copied().unwrap_or(0);
+        stored + crate::play::live_ms_for(&self.selected).unwrap_or(0)
+    }
 
     fn loader_icon(&self) -> Option<&egui::TextureHandle> {
         match self.loader.as_str() {
@@ -522,6 +540,7 @@ impl eframe::App for Desktop {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump(ctx);
+        self.settle_playtime();
         self.refresh_avatar(ctx);
         if self.icons_dirty {
             self.reload_server_icons(ctx);
@@ -610,7 +629,9 @@ impl Desktop {
     fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
         let paper = self.paper_for(&self.selected);
         if let Some(tex) = self.papers.get(paper.title) {
-            ui.painter().image(tex.id(), full, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            ui.painter().rect_filled(full, 0.0, BG);
+            let fitted = contain_rect(tex.size_vec2(), full);
+            ui.painter().image(tex.id(), fitted, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         } else {
             ui.painter().rect_filled(full, 0.0, BG);
             ui.painter().text(
@@ -668,7 +689,7 @@ impl Desktop {
             egui::Stroke::new(1.0, BORDER_BTN),
         );
         paint_clock(ui.painter(), egui::pos2(card.left() + us(full, 278.0), card.center().y), GOLD);
-        ui.painter().text(egui::pos2(card.left() + us(full, 296.0), card.center().y), egui::Align2::LEFT_CENTER, "0.0 H", lexend(us(full, 16.0)), TEXT);
+        paint_play_stat(ui, egui::pos2(card.left() + us(full, 296.0), card.center().y), self.shown_play_ms(), us(full, 16.0));
         if card_hit.clicked() {
             let at = card_hit.interact_pointer_pos().unwrap_or(card.center());
             if icon_rect.contains(at) {
@@ -1587,6 +1608,28 @@ fn window_edges(ctx: &egui::Context) {
             if resp.drag_started() { ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(*dir)); }
         }
     });
+}
+
+fn paint_play_stat(ui: &egui::Ui, origin: egui::Pos2, ms: u128, num_size: f32) {
+    let (number, unit, hours) = crate::state::play_label(ms);
+    let num_font = lexend(num_size);
+    ui.painter().text(origin, egui::Align2::LEFT_CENTER, &number, num_font.clone(), TEXT);
+    let width = ui.painter().layout_no_wrap(number, num_font, TEXT).size().x;
+    let unit_size = if hours { num_size * 1.35 } else { num_size * 0.68 };
+    let unit_at = origin + egui::vec2(width + 4.0, if hours { -1.0 } else { 2.0 });
+    ui.painter().text(unit_at, egui::Align2::LEFT_CENTER, unit, lexend(unit_size), if hours { TEXT } else { MUTED });
+}
+
+fn load_playtime(app: &App) -> HashMap<String, u128> {
+    let Ok(text) = std::fs::read_to_string(app.p("playtime.json")) else { return HashMap::new(); };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { return HashMap::new(); };
+    let Some(obj) = value.as_object() else { return HashMap::new(); };
+    obj.iter().filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n as u128))).collect()
+}
+
+fn save_playtime(app: &App, times: &HashMap<String, u128>) {
+    let value: serde_json::Map<String, serde_json::Value> = times.iter().map(|(k, v)| (k.clone(), serde_json::json!(v))).collect();
+    let _ = std::fs::write(app.p("playtime.json"), serde_json::to_string(&value).unwrap_or_default());
 }
 
 fn contain_rect(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {

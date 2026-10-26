@@ -21,6 +21,17 @@ pub fn java_exe(root: &Path) -> PathBuf {
     }
 }
 
+/// Windowed Java. `java.exe` opens a console; `javaw.exe` does not.
+pub fn gui_exe(java: &Path) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        let javaw = java.with_file_name("javaw.exe");
+        if javaw.is_file() {
+            return javaw;
+        }
+    }
+    java.to_path_buf()
+}
+
 pub fn system_java() -> Option<PathBuf> {
     let exe = if cfg!(target_os = "windows") { "java.exe" } else { "java" };
     if let Some(java_home) = std::env::var_os("JAVA_HOME") {

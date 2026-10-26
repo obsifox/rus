@@ -84,6 +84,16 @@ pub fn next_loader(id: &str) -> &'static str {
     order[(i + 1) % order.len()]
 }
 
+/// Under an hour the unit is a small `m`. At one hour and beyond it is `1.0 H`.
+pub fn play_label(ms: u128) -> (String, &'static str, bool) {
+    if ms >= 3_600_000 {
+        let hours = (ms as f64 / 3_600_000.0 * 10.0).round() / 10.0;
+        (format!("{hours:.1}"), "H", true)
+    } else {
+        ((ms / 60_000).to_string(), "m", false)
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -371,5 +381,13 @@ mod tests {
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].address, "new.example");
         assert!(recent.iter().all(|s| s.played_at > 0));
+    }
+
+    #[test]
+    fn play_time_uses_small_m_until_one_hour() {
+        assert_eq!(play_label(0), ("0".into(), "m", false));
+        assert_eq!(play_label(59 * 60_000), ("59".into(), "m", false));
+        assert_eq!(play_label(3_600_000), ("1.0".into(), "H", true));
+        assert_eq!(play_label(90 * 60_000), ("1.5".into(), "H", true));
     }
 }

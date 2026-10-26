@@ -1,7 +1,8 @@
 //! Rus — a native Minecraft: Java Edition launcher.
 //!
 //! The window is the program. It does not open a browser and it does not
-//! serve a web page.
+//! serve a web page. Release builds do not open a console.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod desktop;
 mod dialog;
