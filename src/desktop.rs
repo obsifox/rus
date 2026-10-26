@@ -2,7 +2,7 @@
 
 use crate::preview3d::SkinPreview;
 use crate::skinmodel::ArmModel;
-use crate::state::{now_ms, App, Job};
+use crate::state::{now_ms, App, Job, ServerEntry};
 use crate::wallpapers::{self, Paper};
 use eframe::egui::{self, CursorIcon, ResizeDirection, RichText, Sense, ViewportCommand};
 use image::RgbaImage;
@@ -83,9 +83,13 @@ struct Desktop {
     papers: HashMap<String, egui::TextureHandle>,
     mark: Option<egui::TextureHandle>,
     grass: Option<egui::TextureHandle>,
-    btn_h: Option<egui::TextureHandle>,
-    btn_raptor: Option<egui::TextureHandle>,
-    btn_crest: Option<egui::TextureHandle>,
+    servers: Vec<ServerEntry>,
+    server_icons: HashMap<String, egui::TextureHandle>,
+    server_name: String,
+    server_addr: String,
+    join: Option<String>,
+    join_name: String,
+    icons_dirty: bool,
     avatar: Option<egui::TextureHandle>,
     avatar_key: String,
     mods: Vec<(String, bool, u64)>,
@@ -154,10 +158,14 @@ impl Desktop {
             selected,
             papers: HashMap::new(),
             mark: load_texture(&cc.egui_ctx, "mark", include_bytes!("../assets/mark-32.png")),
-            grass: load_texture(&cc.egui_ctx, "grass", include_bytes!("../assets/chrome/grass.png")),
-            btn_h: load_texture(&cc.egui_ctx, "btn-h", include_bytes!("../assets/chrome/btn-h.png")),
-            btn_raptor: load_texture(&cc.egui_ctx, "btn-raptor", include_bytes!("../assets/chrome/btn-raptor.png")),
-            btn_crest: load_texture(&cc.egui_ctx, "btn-crest", include_bytes!("../assets/chrome/btn-crest.png")),
+            grass: load_texture(&cc.egui_ctx, "vanilla", include_bytes!("../assets/vanilla-grass.png")),
+            servers: app.load_servers(),
+            server_icons: HashMap::new(),
+            server_name: String::new(),
+            server_addr: String::new(),
+            join: None,
+            join_name: String::new(),
+            icons_dirty: true,
             avatar: None,
             avatar_key: String::new(),
             mods: Vec::new(),
@@ -262,14 +270,125 @@ impl Desktop {
         let id = self.selected.clone();
         let app = self.app.clone();
         let tx = self.tx.clone();
-        self.notice = format!("Starting {id}…");
+        let join = self.join.clone();
+        if let Some(addr) = join.clone() {
+            crate::state::mark_played(&mut self.servers, &self.join_name, &addr);
+            self.app.save_servers(&self.servers);
+            self.icons_dirty = true;
+            self.notice = format!("Starting {id} on {addr}…");
+        } else {
+            self.notice = format!("Starting {id}…");
+        }
         std::thread::spawn(move || {
-            let msg = match crate::play::launch(&app, &id) {
-                Ok(_) => format!("{id} is running in the sandbox"),
+            let msg = match crate::play::launch_join(&app, &id, join.as_deref()) {
+                Ok(_) => {
+                    if let Some(addr) = join.as_deref() {
+                        format!("{id} is joining {addr}")
+                    } else {
+                        format!("{id} is running in the sandbox")
+                    }
+                }
                 Err(e) => e,
             };
             let _ = tx.send(Msg::Notice(msg));
         });
+        self.join = None;
+    }
+
+    fn join_server(&mut self, name: String, address: String) {
+        let address = address.trim().to_string();
+        if address.is_empty() {
+            self.notice = "Server address is empty".into();
+            return;
+        }
+        self.join_name = if name.trim().is_empty() { address.clone() } else { name.trim().to_string() };
+        self.join = Some(address);
+        self.engine = "vanilla".into();
+        self.save_settings();
+        self.play();
+    }
+
+    fn add_server(&mut self) {
+        let address = self.server_addr.trim().to_string();
+        if address.is_empty() {
+            return;
+        }
+        let name = self.server_name.trim().to_string();
+        if let Some(existing) = self.servers.iter_mut().find(|s| s.address.eq_ignore_ascii_case(&address)) {
+            if !name.is_empty() {
+                existing.name = name;
+            }
+        } else {
+            self.servers.push(ServerEntry {
+                name: if name.is_empty() { address.clone() } else { name },
+                address,
+                icon: String::new(),
+                played_at: 0,
+            });
+        }
+        self.app.save_servers(&self.servers);
+        self.server_name.clear();
+        self.server_addr.clear();
+    }
+
+    fn set_server_icon(&mut self, address: &str, path: &std::path::Path) {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.import_error = e.to_string();
+                return;
+            }
+        };
+        if image::load_from_memory(&bytes).is_err() {
+            self.import_error = "Server icon must be a PNG. The previous icon was kept.".into();
+            return;
+        }
+        let file = icon_file(address);
+        let dest = self.app.p(&format!("servers/{file}"));
+        if let Some(parent) = dest.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(&dest, &bytes) {
+            self.import_error = e.to_string();
+            return;
+        }
+        if let Some(entry) = self.servers.iter_mut().find(|s| s.address.eq_ignore_ascii_case(address)) {
+            entry.icon = file;
+        }
+        self.app.save_servers(&self.servers);
+        self.import_error.clear();
+        self.icons_dirty = true;
+    }
+
+    fn reload_server_icons(&mut self, ctx: &egui::Context) {
+        self.server_icons.clear();
+        for server in &self.servers {
+            if server.icon.is_empty() {
+                continue;
+            }
+            let path = self.app.p(&format!("servers/{}", server.icon));
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            if let Some(tex) = load_texture(ctx, &format!("srv-{}", server.address), &bytes) {
+                self.server_icons.insert(server.address.clone(), tex);
+            }
+        }
+    }
+
+    fn paint_recent_servers(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let recent = crate::state::recent_played(&self.servers);
+        if recent.is_empty() {
+            return;
+        }
+        let icons = self.server_icons.clone();
+        for (i, server) in recent.iter().enumerate() {
+            let y = 256.0 + i as f32 * 74.0;
+            let rect = egui::Rect::from_min_size(egui::pos2(ux(full, 1204.0), uy(full, y)), egui::vec2(us(full, 62.0), us(full, 62.0)));
+            let tex = icons.get(&server.address);
+            let label = if server.name.is_empty() { server.address.as_str() } else { server.name.as_str() };
+            if server_badge(ui, rect, tex, &format!("recent-{i}"), label) {
+                self.join_server(server.name.clone(), server.address.clone());
+            }
+        }
     }
 
     fn play(&mut self) {
@@ -383,6 +502,10 @@ impl eframe::App for Desktop {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump(ctx);
         self.refresh_avatar(ctx);
+        if self.icons_dirty {
+            self.reload_server_icons(ctx);
+            self.icons_dirty = false;
+        }
         ctx.request_repaint_after(Duration::from_millis(if self.preview.auto_rotate || self.preview.walk { 16 } else { 250 }));
         if !ctx.wants_keyboard_input() {
             if ctx.input(|i| i.key_pressed(egui::Key::Num1)) { self.tab = Tab::Home; }
@@ -466,7 +589,7 @@ impl Desktop {
     fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
         let paper = self.paper_for(&self.selected);
         if let Some(tex) = self.papers.get(paper.title) {
-            ui.painter().image(tex.id(), full, cover_uv(tex.size_vec2(), full), egui::Color32::WHITE);
+            ui.painter().image(tex.id(), full, zoomed_cover(tex.size_vec2(), full, 1.62), egui::Color32::WHITE);
         } else {
             ui.painter().rect_filled(full, 0.0, BG);
             ui.painter().text(
@@ -507,34 +630,13 @@ impl Desktop {
         paint_exit_icon(ui.painter(), exit.center(), TEXT);
 
         let horizon_on = self.engine == "horizon";
-        let btn_h = self.btn_h.clone();
-        let btn_raptor = self.btn_raptor.clone();
-        let btn_crest = self.btn_crest.clone();
-        let rail = [
-            (256.0, btn_h, "rail-h", "Horizon", true),
-            (330.0, btn_raptor, "rail-raptor", "Mod", false),
-            (404.0, btn_crest, "rail-crest", "Settings", false),
-        ];
-        for (i, (y, tex, id, tip, is_h)) in rail.into_iter().enumerate() {
-            let rect = egui::Rect::from_min_size(egui::pos2(ux(full, 1204.0), uy(full, y)), egui::vec2(us(full, 62.0), us(full, 62.0)));
-            let on = if is_h { horizon_on } else if i == 1 { self.tab == Tab::Mods } else { self.tab == Tab::Settings };
-            if image_button(ui, rect, tex.as_ref(), id, tip, on) {
-                if is_h {
-                    self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
-                    self.save_settings();
-                } else if i == 1 {
-                    self.tab = Tab::Mods;
-                } else {
-                    self.tab = Tab::Settings;
-                }
-            }
-        }
+        self.paint_recent_servers(ui, full);
 
         let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 632.0)), egui::vec2(us(full, 470.0), us(full, 64.0)));
         let card_hit = ui.interact(card, egui::Id::new("instance-card"), Sense::click());
         glass(ui.painter(), card, 10.0, if card_hit.hovered() { glass_hover() } else { glass_fill() });
         if let Some(grass) = &self.grass {
-            let icon = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 36.0), card.center().y), egui::vec2(us(full, 36.0), us(full, 36.0)));
+            let icon = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 36.0), card.center().y), egui::vec2(us(full, 42.0), us(full, 42.0)));
             ui.painter().image(grass.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
         let engine = if horizon_on { "HORIZON" } else { "VANILLA" };
@@ -565,7 +667,19 @@ impl Desktop {
         let note_w = ui.painter().layout_no_wrap(note.clone(), note_font.clone(), GOLD).size().x;
         paint_diamond(ui.painter(), egui::pos2(play.right() - note_w - us(full, 18.0), play.top() - us(full, 16.0)), GOLD);
         ui.painter().text(egui::pos2(play.right() - us(full, 4.0), play.top() - us(full, 16.0)), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
+        if self.selected.starts_with("26.3") {
+            let href = egui::Rect::from_min_size(
+                egui::pos2(play.left() - us(full, 124.0), play.top() + us(full, 14.0)),
+                egui::vec2(us(full, 112.0), us(full, 46.0)),
+            );
+            if icon_button(ui, href, "horizon-toggle", horizon_on, "Start 26.3 with the Horizon client") {
+                self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
+                self.save_settings();
+            }
+            ui.painter().text(href.center(), egui::Align2::CENTER_CENTER, "Horizon", lexend(us(full, 13.0)), if horizon_on { GOLD } else { TEXT });
+        }
         if play_button(ui, play, label) {
+            self.join = None;
             self.play();
         }
         if let Some((progress, _)) = self.job_line() {
@@ -591,12 +705,12 @@ impl Desktop {
         let rect = egui::Rect::from_min_size(origin, egui::vec2(h * 2.9, h));
         let hit = ui.interact(rect, egui::Id::new("account-chip"), Sense::click());
         glass(ui.painter(), rect, 10.0, if hit.hovered() { glass_hover() } else { glass_fill() });
-        let head = egui::Rect::from_center_size(egui::pos2(rect.left() + h * 0.46, rect.center().y), egui::vec2(h * 0.78, h * 0.78));
-        ui.painter().rect_filled(head, 4.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
+        let head = egui::Rect::from_center_size(egui::pos2(rect.left() + h * 0.36, rect.center().y), egui::vec2(h * 0.42, h * 0.42));
+        ui.painter().rect_filled(head, 3.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
         if let Some(face) = &self.avatar {
-            ui.painter().image(face.id(), head.shrink(2.0), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            ui.painter().image(face.id(), head.shrink(1.0), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        ui.painter().text(egui::pos2(rect.left() + h * 0.86, rect.center().y), egui::Align2::LEFT_CENTER, name, lexend(h * 0.40), TEXT);
+        ui.painter().text(egui::pos2(rect.left() + h * 0.66, rect.center().y), egui::Align2::LEFT_CENTER, name, lexend(h * 0.36), TEXT);
         if hit.clicked() {
             self.tab = Tab::Settings;
         }
@@ -1081,6 +1195,39 @@ impl Desktop {
                         spawn_versions(self.app.clone(), self.tx.clone());
                     }
                     ui.add_space(10.0);
+                    ui.label(RichText::new("Servers").size(14.0).color(TEXT));
+                    ui.label(RichText::new("Last three you play show on the right. None yet means the rail stays empty.").size(12.0).color(MUTED));
+                    if field(ui, &mut self.server_name, 250.0, "Name").changed() {}
+                    if field(ui, &mut self.server_addr, 250.0, "host or host:port").changed() {}
+                    ui.horizontal(|ui| {
+                        if button(ui, "Add", 72.0, 36.0, false) {
+                            self.add_server();
+                        }
+                        if button(ui, "Join", 72.0, 36.0, true) {
+                            let name = self.server_name.clone();
+                            let addr = self.server_addr.clone();
+                            self.add_server();
+                            if !addr.trim().is_empty() {
+                                self.join_server(name, addr);
+                            }
+                        }
+                    });
+                    let rows: Vec<(String, String, String)> = self.servers.iter().map(|s| (s.name.clone(), s.address.clone(), s.icon.clone())).collect();
+                    for (name, addr, icon) in rows {
+                        ui.horizontal(|ui| {
+                            let label = if name.is_empty() { addr.clone() } else { name.clone() };
+                            ui.label(RichText::new(label).size(13.0).color(if icon.is_empty() { MUTED } else { TEXT }));
+                            if button(ui, "Play", 64.0, 32.0, false) {
+                                self.join_server(name.clone(), addr.clone());
+                            }
+                            if button(ui, "Icon", 56.0, 32.0, false) {
+                                if let Some(path) = crate::dialog::pick_file("Server icon", "*.png") {
+                                    self.set_server_icon(&addr, &path);
+                                }
+                            }
+                        });
+                    }
+                    ui.add_space(10.0);
                     ui.label(RichText::new("Data folder").size(14.0).color(TEXT));
                     ui.label(RichText::new(self.app.dir.display().to_string()).size(12.0).color(MUTED));
                     if button(ui, "Open", 88.0, 40.0, false) {
@@ -1405,6 +1552,13 @@ fn window_edges(ctx: &egui::Context) {
     });
 }
 
+fn zoomed_cover(src: egui::Vec2, dst: egui::Rect, zoom: f32) -> egui::Rect {
+    let uv = cover_uv(src, dst);
+    let zoom = zoom.max(1.0);
+    let size = uv.size() / zoom;
+    egui::Rect::from_center_size(uv.center(), size)
+}
+
 fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
     if src.x <= 0.0 || src.y <= 0.0 || dst.width() <= 0.0 || dst.height() <= 0.0 {
         return egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
@@ -1440,6 +1594,29 @@ fn install_font(ctx: &egui::Context) {
 fn ux(full: egui::Rect, x: f32) -> f32 { full.left() + x * full.width() / 1280.0 }
 fn uy(full: egui::Rect, y: f32) -> f32 { full.top() + y * full.height() / 720.0 }
 fn us(full: egui::Rect, v: f32) -> f32 { v * (full.width() / 1280.0).min(full.height() / 720.0) }
+
+fn icon_file(address: &str) -> String {
+    let slug: String = address.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    format!("{slug}.png")
+}
+
+fn server_badge(ui: &mut egui::Ui, rect: egui::Rect, tex: Option<&egui::TextureHandle>, id: &str, tip: &str) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
+    glass(ui.painter(), rect, 12.0, if hit.hovered() { glass_hover() } else { glass_fill() });
+    let inner = rect.shrink(6.0);
+    if let Some(tex) = tex {
+        ui.painter().image(tex.id(), inner, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+    } else {
+        let letter = tip.chars().next().unwrap_or('?').to_uppercase().to_string();
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, letter, lexend(rect.height() * 0.42), GOLD);
+    }
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let clicked = hit.clicked();
+    hit.on_hover_text(tip);
+    clicked
+}
 
 fn image_button(ui: &mut egui::Ui, rect: egui::Rect, tex: Option<&egui::TextureHandle>, id: &str, tip: &str, on: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new(id), Sense::click());

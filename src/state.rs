@@ -252,6 +252,67 @@ impl App {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct ServerEntry {
+    pub name: String,
+    pub address: String,
+    pub icon: String,
+    pub played_at: u128,
+}
+
+impl App {
+    pub fn load_servers(&self) -> Vec<ServerEntry> {
+        std::fs::read_to_string(self.p("servers.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_servers(&self, servers: &[ServerEntry]) {
+        let _ = std::fs::create_dir_all(self.p("servers"));
+        let _ = std::fs::write(
+            self.p("servers.json"),
+            serde_json::to_string_pretty(servers).unwrap_or_default(),
+        );
+    }
+}
+
+/// Last servers the player actually launched. Saved-but-unplayed entries stay off the rail.
+pub fn recent_played(servers: &[ServerEntry]) -> Vec<ServerEntry> {
+    let mut list: Vec<ServerEntry> = servers
+        .iter()
+        .filter(|s| s.played_at > 0 && !s.address.trim().is_empty())
+        .cloned()
+        .collect();
+    list.sort_by(|a, b| b.played_at.cmp(&a.played_at));
+    list.truncate(3);
+    list
+}
+
+pub fn mark_played(servers: &mut Vec<ServerEntry>, name: &str, address: &str) {
+    let address = address.trim();
+    if address.is_empty() {
+        return;
+    }
+    let now = now_ms();
+    if let Some(entry) = servers.iter_mut().find(|s| s.address.eq_ignore_ascii_case(address)) {
+        entry.played_at = now;
+        if !name.trim().is_empty() {
+            entry.name = name.trim().to_string();
+        }
+    } else {
+        servers.insert(
+            0,
+            ServerEntry {
+                name: if name.trim().is_empty() { address.to_string() } else { name.trim().to_string() },
+                address: address.to_string(),
+                icon: String::new(),
+                played_at: now,
+            },
+        );
+    }
+}
+
 /// Offline (local) account UUID: UUID v3 of "OfflinePlayer:<name>", like vanilla.
 pub fn offline_uuid(name: &str) -> String {
     use md5::{Digest, Md5};
@@ -269,4 +330,22 @@ pub fn offline_uuid(name: &str) -> String {
         &hex[16..20],
         &hex[20..32]
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rail_hides_until_a_server_is_played() {
+        let saved = vec![
+            ServerEntry { name: "Lobby".into(), address: "play.example".into(), icon: String::new(), played_at: 0 },
+            ServerEntry { name: "Old".into(), address: "old.example".into(), icon: String::new(), played_at: 10 },
+            ServerEntry { name: "New".into(), address: "new.example".into(), icon: String::new(), played_at: 30 },
+        ];
+        let recent = recent_played(&saved);
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].address, "new.example");
+        assert!(recent.iter().all(|s| s.played_at > 0));
+    }
 }

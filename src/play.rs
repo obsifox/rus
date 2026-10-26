@@ -54,6 +54,10 @@ fn parse_legacy_args(s: &str, vars: &HashMap<String, String>) -> Vec<String> {
 }
 
 pub fn build_command(app: &App, id: &str) -> Result<(Command, PathBuf), String> {
+    build_command_join(app, id, None)
+}
+
+pub fn build_command_join(app: &App, id: &str, server: Option<&str>) -> Result<(Command, PathBuf), String> {
     let settings = app.settings();
     let version_dir = app.p(&format!("versions/{id}"));
     if !version_dir.join(format!("{id}.json")).exists() {
@@ -240,6 +244,13 @@ pub fn build_command(app: &App, id: &str) -> Result<(Command, PathBuf), String> 
     if settings.fullscreen {
         cmd.arg("--fullscreen");
     }
+    if let Some(addr) = server.map(str::trim).filter(|s| !s.is_empty()) {
+        let (host, port) = split_server(addr);
+        cmd.arg("--server").arg(host);
+        if let Some(port) = port {
+            cmd.arg("--port").arg(port);
+        }
+    }
 
     let log_path = app.p(&format!("logs/{id}.log"));
     if let Some(parent) = log_path.parent() {
@@ -284,7 +295,20 @@ pub fn build_command(app: &App, id: &str) -> Result<(Command, PathBuf), String> 
     Ok((cmd, javaw))
 }
 
+fn split_server(addr: &str) -> (String, Option<String>) {
+    if let Some((host, port)) = addr.rsplit_once(':') {
+        if !host.is_empty() && !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
+            return (host.to_string(), Some(port.to_string()));
+        }
+    }
+    (addr.to_string(), None)
+}
+
 pub fn launch(app: &App, id: &str) -> Result<serde_json::Value, String> {
+    launch_join(app, id, None)
+}
+
+pub fn launch_join(app: &App, id: &str, server: Option<&str>) -> Result<serde_json::Value, String> {
     {
         let mut r = running().lock().unwrap();
         if let Some(proc) = r.as_mut() {
@@ -300,7 +324,7 @@ pub fn launch(app: &App, id: &str) -> Result<serde_json::Value, String> {
     let _ = crate::mods::stage(app, id);
     let _ = crate::skin::build_pack(app, &gdir, &settings.username, &settings.skin, &settings.cape);
 
-    let (mut cmd, javaw) = build_command(app, id)?;
+    let (mut cmd, javaw) = build_command_join(app, id, server)?;
     let log_path = app.p(&format!("logs/{id}.log"));
     let child = cmd.spawn().map_err(|e| format!("Failed to start Java: {e}"))?;
     crate::sandbox::attach(&child);

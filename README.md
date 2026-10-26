@@ -121,8 +121,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.0/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.0/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.1/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.1/rus-windows-x64.exe) |
 
 Linux:
 
