@@ -83,6 +83,9 @@ struct Desktop {
     papers: HashMap<String, egui::TextureHandle>,
     mark: Option<egui::TextureHandle>,
     grass: Option<egui::TextureHandle>,
+    btn_h: Option<egui::TextureHandle>,
+    btn_raptor: Option<egui::TextureHandle>,
+    btn_crest: Option<egui::TextureHandle>,
     avatar: Option<egui::TextureHandle>,
     avatar_key: String,
     mods: Vec<(String, bool, u64)>,
@@ -151,7 +154,10 @@ impl Desktop {
             selected,
             papers: HashMap::new(),
             mark: load_texture(&cc.egui_ctx, "mark", include_bytes!("../assets/mark-32.png")),
-            grass: Some(grass_texture(&cc.egui_ctx)),
+            grass: load_texture(&cc.egui_ctx, "grass", include_bytes!("../assets/chrome/grass.png")),
+            btn_h: load_texture(&cc.egui_ctx, "btn-h", include_bytes!("../assets/chrome/btn-h.png")),
+            btn_raptor: load_texture(&cc.egui_ctx, "btn-raptor", include_bytes!("../assets/chrome/btn-raptor.png")),
+            btn_crest: load_texture(&cc.egui_ctx, "btn-crest", include_bytes!("../assets/chrome/btn-crest.png")),
             avatar: None,
             avatar_key: String::new(),
             mods: Vec::new(),
@@ -341,8 +347,8 @@ impl Desktop {
     fn refresh_avatar(&mut self, ctx: &egui::Context) {
         if self.avatar_key == self.skin && self.avatar.is_some() { return; }
         let Some(img) = self.skin_image() else { return; };
-        let face = crate::skinmodel::face_avatar(&img, 32);
-        let color = egui::ColorImage::from_rgba_unmultiplied([32, 32], face.as_raw());
+        let face = crate::skinmodel::face_avatar(&img, 64);
+        let color = egui::ColorImage::from_rgba_unmultiplied([64, 64], face.as_raw());
         self.avatar = Some(ctx.load_texture("avatar", color, egui::TextureOptions::NEAREST));
         self.avatar_key = self.skin.clone();
         self.preview.invalidate();
@@ -438,14 +444,9 @@ impl Desktop {
             toggle_max(ui.ctx());
         }
 
-        let margin = 16.0;
-        let top = 16.0;
-        let bar_h = 52.0;
-        let rail = 46.0;
-        let bottom_h = 58.0;
         let content = egui::Rect::from_min_max(
-            egui::pos2(margin, top + bar_h + 14.0),
-            egui::pos2(full.right() - margin - rail - 14.0, full.bottom() - margin - bottom_h - 28.0),
+            egui::pos2(ux(full, 26.0), uy(full, 108.0)),
+            egui::pos2(ux(full, 1168.0), uy(full, 608.0)),
         );
         if self.tab != Tab::Home {
             glass(ui.painter(), content, 14.0, glass_fill());
@@ -497,80 +498,79 @@ impl Desktop {
     }
 
     fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let margin = 16.0;
-        let top = 16.0;
-        let bar_h = 52.0;
-        self.account_bar(ui, egui::pos2(margin, top), bar_h);
-        self.nav_bar(ui, egui::pos2(margin + 188.0, top), bar_h);
-        let exit = egui::Rect::from_min_size(egui::pos2(full.right() - margin - 46.0, top + 3.0), egui::vec2(46.0, 46.0));
+        self.account_bar(ui, egui::pos2(ux(full, 26.0), uy(full, 26.0)), us(full, 63.0));
+        self.nav_bar(ui, egui::pos2(ux(full, 214.0), uy(full, 26.0)), us(full, 63.0));
+        let exit = egui::Rect::from_min_size(egui::pos2(ux(full, 1210.0), uy(full, 28.0)), egui::vec2(us(full, 52.0), us(full, 52.0)));
         if icon_button(ui, exit, "exit", false, "Exit") {
             self.quit(ui.ctx());
         }
         paint_exit_icon(ui.painter(), exit.center(), TEXT);
 
-        let rail_x = full.right() - margin - 46.0;
-        let rail_y = 168.0;
         let horizon_on = self.engine == "horizon";
-        let hrect = egui::Rect::from_min_size(egui::pos2(rail_x, rail_y), egui::vec2(46.0, 46.0));
-        if icon_button(ui, hrect, "rail-horizon", horizon_on, "Horizon") {
-            self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
-            self.save_settings();
+        let btn_h = self.btn_h.clone();
+        let btn_raptor = self.btn_raptor.clone();
+        let btn_crest = self.btn_crest.clone();
+        let rail = [
+            (256.0, btn_h, "rail-h", "Horizon", true),
+            (330.0, btn_raptor, "rail-raptor", "Mod", false),
+            (404.0, btn_crest, "rail-crest", "Settings", false),
+        ];
+        for (i, (y, tex, id, tip, is_h)) in rail.into_iter().enumerate() {
+            let rect = egui::Rect::from_min_size(egui::pos2(ux(full, 1204.0), uy(full, y)), egui::vec2(us(full, 62.0), us(full, 62.0)));
+            let on = if is_h { horizon_on } else if i == 1 { self.tab == Tab::Mods } else { self.tab == Tab::Settings };
+            if image_button(ui, rect, tex.as_ref(), id, tip, on) {
+                if is_h {
+                    self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
+                    self.save_settings();
+                } else if i == 1 {
+                    self.tab = Tab::Mods;
+                } else {
+                    self.tab = Tab::Settings;
+                }
+            }
         }
-        ui.painter().text(hrect.center(), egui::Align2::CENTER_CENTER, "H", egui::FontId::proportional(22.0), GOLD);
 
-        let mrect = hrect.translate(egui::vec2(0.0, 56.0));
-        if icon_button(ui, mrect, "rail-mod", self.tab == Tab::Mods, "Mod") {
-            self.tab = Tab::Mods;
-        }
-        paint_creature(ui.painter(), mrect.center());
-
-        let srect = mrect.translate(egui::vec2(0.0, 56.0));
-        if icon_button(ui, srect, "rail-settings", self.tab == Tab::Settings, "Settings") {
-            self.tab = Tab::Settings;
-        }
-        paint_crest(ui.painter(), srect.center());
-
-        let card = egui::Rect::from_min_size(egui::pos2(margin, full.bottom() - margin - 58.0), egui::vec2(430.0, 58.0));
+        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 632.0)), egui::vec2(us(full, 470.0), us(full, 64.0)));
         let card_hit = ui.interact(card, egui::Id::new("instance-card"), Sense::click());
-        glass(ui.painter(), card, 12.0, if card_hit.hovered() { glass_hover() } else { glass_fill() });
+        glass(ui.painter(), card, 10.0, if card_hit.hovered() { glass_hover() } else { glass_fill() });
         if let Some(grass) = &self.grass {
-            let icon = egui::Rect::from_center_size(egui::pos2(card.left() + 32.0, card.center().y), egui::vec2(30.0, 30.0));
+            let icon = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 36.0), card.center().y), egui::vec2(us(full, 36.0), us(full, 36.0)));
             ui.painter().image(grass.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
         let engine = if horizon_on { "HORIZON" } else { "VANILLA" };
-        ui.painter().text(egui::pos2(card.left() + 58.0, card.center().y), egui::Align2::LEFT_CENTER, engine, egui::FontId::proportional(15.0), GOLD);
-        ui.painter().text(egui::pos2(card.left() + 168.0, card.center().y), egui::Align2::LEFT_CENTER, &self.selected, egui::FontId::proportional(18.0), TEXT);
+        ui.painter().text(egui::pos2(card.left() + us(full, 64.0), card.center().y), egui::Align2::LEFT_CENTER, engine, lexend(us(full, 15.0)), GOLD);
+        ui.painter().text(egui::pos2(card.left() + us(full, 168.0), card.center().y), egui::Align2::LEFT_CENTER, &self.selected, lexend(us(full, 20.0)), TEXT);
         ui.painter().line_segment(
-            [egui::pos2(card.left() + 250.0, card.center().y - 12.0), egui::pos2(card.left() + 250.0, card.center().y + 12.0)],
+            [egui::pos2(card.left() + us(full, 250.0), card.center().y - 12.0), egui::pos2(card.left() + us(full, 250.0), card.center().y + 12.0)],
             egui::Stroke::new(1.0, BORDER_BTN),
         );
-        paint_clock(ui.painter(), egui::pos2(card.left() + 276.0, card.center().y), GOLD);
-        let stat = format!("{} GB", (self.ram as f32 / 1024.0).round() as u32);
-        ui.painter().text(egui::pos2(card.left() + 294.0, card.center().y), egui::Align2::LEFT_CENTER, &stat, egui::FontId::proportional(16.0), TEXT);
+        paint_clock(ui.painter(), egui::pos2(card.left() + us(full, 278.0), card.center().y), GOLD);
+        ui.painter().text(egui::pos2(card.left() + us(full, 296.0), card.center().y), egui::Align2::LEFT_CENTER, "0.0 H", lexend(us(full, 16.0)), TEXT);
         if card_hit.clicked() {
             self.tab = Tab::Versions;
         }
         card_hit.on_hover_text("Choose a version");
 
-        let play = egui::Rect::from_min_size(egui::pos2(full.right() - margin - 210.0, full.bottom() - margin - 54.0), egui::vec2(210.0, 54.0));
+        let play = egui::Rect::from_min_size(egui::pos2(ux(full, 990.0), uy(full, 622.0)), egui::vec2(us(full, 263.0), us(full, 75.0)));
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
         let label = if live { "STOP" } else { "PLAY" };
-        let note = if let Some((progress, line)) = self.job_line() {
-            let _ = progress;
+        let note = if let Some((_, line)) = self.job_line() {
             line
         } else if self.notice != "Ready" && !self.notice.is_empty() {
             self.notice.clone()
         } else {
-            self.channel_label()
+            format!("Patch {}", env!("CARGO_PKG_VERSION"))
         };
-        ui.painter().text(egui::pos2(play.right() - 4.0, play.top() - 16.0), egui::Align2::RIGHT_CENTER, &note, egui::FontId::proportional(13.0), MUTED);
-        paint_diamond(ui.painter(), egui::pos2(play.right() - note_width(ui, &note) - 16.0, play.top() - 16.0), GOLD);
+        let note_font = lexend(us(full, 14.0));
+        let note_w = ui.painter().layout_no_wrap(note.clone(), note_font.clone(), GOLD).size().x;
+        paint_diamond(ui.painter(), egui::pos2(play.right() - note_w - us(full, 18.0), play.top() - us(full, 16.0)), GOLD);
+        ui.painter().text(egui::pos2(play.right() - us(full, 4.0), play.top() - us(full, 16.0)), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
         if play_button(ui, play, label) {
             self.play();
         }
         if let Some((progress, _)) = self.job_line() {
             let bar = egui::Rect::from_min_max(
-                egui::pos2(play.left(), play.bottom() - 3.0),
+                egui::pos2(play.left(), play.bottom() - 4.0),
                 egui::pos2(play.left() + play.width() * progress.clamp(0.0, 1.0), play.bottom()),
             );
             ui.painter().rect_filled(bar, 2.0, egui::Color32::from_white_alpha(180));
@@ -588,14 +588,15 @@ impl Desktop {
 
     fn account_bar(&mut self, ui: &mut egui::Ui, origin: egui::Pos2, h: f32) {
         let name = if self.username.is_empty() { "Player" } else { &self.username };
-        let rect = egui::Rect::from_min_size(origin, egui::vec2(176.0, h));
+        let rect = egui::Rect::from_min_size(origin, egui::vec2(h * 2.9, h));
         let hit = ui.interact(rect, egui::Id::new("account-chip"), Sense::click());
-        glass(ui.painter(), rect, 12.0, if hit.hovered() { glass_hover() } else { glass_fill() });
-        if let Some(grass) = &self.grass {
-            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 30.0, rect.center().y), egui::vec2(28.0, 28.0));
-            ui.painter().image(grass.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        glass(ui.painter(), rect, 10.0, if hit.hovered() { glass_hover() } else { glass_fill() });
+        let head = egui::Rect::from_center_size(egui::pos2(rect.left() + h * 0.46, rect.center().y), egui::vec2(h * 0.78, h * 0.78));
+        ui.painter().rect_filled(head, 4.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
+        if let Some(face) = &self.avatar {
+            ui.painter().image(face.id(), head.shrink(2.0), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        ui.painter().text(egui::pos2(rect.left() + 52.0, rect.center().y), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(18.0), TEXT);
+        ui.painter().text(egui::pos2(rect.left() + h * 0.86, rect.center().y), egui::Align2::LEFT_CENTER, name, lexend(h * 0.40), TEXT);
         if hit.clicked() {
             self.tab = Tab::Settings;
         }
@@ -607,7 +608,7 @@ impl Desktop {
         let mut widths = Vec::new();
         let mut total = 8.0;
         for tab in tabs {
-            let galley = ui.painter().layout_no_wrap(tab.label().to_string(), egui::FontId::proportional(15.0), TEXT);
+            let galley = ui.painter().layout_no_wrap(tab.label().to_string(), lexend(15.0), TEXT);
             let w = 18.0 + 8.0 + galley.size().x + 16.0;
             widths.push(w);
             total += w + 4.0;
@@ -631,7 +632,7 @@ impl Desktop {
                 Tab::Mods => paint_cube(ui.painter(), icon_at, color),
                 Tab::Settings => paint_gear(ui.painter(), icon_at, color),
             }
-            ui.painter().text(egui::pos2(item.left() + 30.0, item.center().y), egui::Align2::LEFT_CENTER, tab.label(), egui::FontId::proportional(15.0), color);
+            ui.painter().text(egui::pos2(item.left() + 30.0, item.center().y), egui::Align2::LEFT_CENTER, tab.label(), lexend(15.0), color);
             if hit.clicked() {
                 self.tab = tab;
             }
@@ -1119,13 +1120,14 @@ fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
     let shadow = rect.translate(egui::vec2(0.0, 3.0));
     ui.painter().rect_filled(shadow, 10.0, egui::Color32::from_black_alpha(80));
     ui.painter().rect_filled(rect, 10.0, fill);
-    let tri = rect.center() + egui::vec2(-28.0, 0.0);
+    let tri = egui::pos2(rect.left() + rect.width() * 0.22, rect.center().y);
+    let s = rect.height() * 0.18;
     ui.painter().add(egui::Shape::convex_polygon(
-        vec![tri + egui::vec2(-6.0, -8.0), tri + egui::vec2(-6.0, 8.0), tri + egui::vec2(8.0, 0.0)],
-        ON_ACCENT,
+        vec![tri + egui::vec2(-s * 0.55, -s), tri + egui::vec2(-s * 0.55, s), tri + egui::vec2(s * 0.9, 0.0)],
+        GOLD,
         egui::Stroke::NONE,
     ));
-    ui.painter().text(rect.center() + egui::vec2(10.0, 0.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(20.0), ON_ACCENT);
+    ui.painter().text(egui::pos2(rect.left() + rect.width() * 0.62, rect.center().y), egui::Align2::CENTER_CENTER, label, lexend(rect.height() * 0.32), ON_ACCENT);
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
@@ -1420,12 +1422,42 @@ fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
     }
 }
 
+fn lexend(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Lexend".into()))
+}
+
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("MozillaHeadline".into(), egui::FontData::from_static(include_bytes!("../assets/MozillaHeadline-600.ttf")).into());
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "MozillaHeadline".into());
-    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "MozillaHeadline".into());
+    fonts.font_data.insert("Lexend".into(), egui::FontData::from_static(include_bytes!("../assets/Lexend-700.ttf")).into());
+    fonts.font_data.insert("Nunito".into(), egui::FontData::from_static(include_bytes!("../assets/NunitoSans-600.ttf")).into());
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Nunito".into());
+    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Nunito".into());
+    fonts.families.insert(egui::FontFamily::Name("Lexend".into()), vec!["Lexend".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Nunito".into()), vec!["Nunito".into()]);
     ctx.set_fonts(fonts);
+}
+
+fn ux(full: egui::Rect, x: f32) -> f32 { full.left() + x * full.width() / 1280.0 }
+fn uy(full: egui::Rect, y: f32) -> f32 { full.top() + y * full.height() / 720.0 }
+fn us(full: egui::Rect, v: f32) -> f32 { v * (full.width() / 1280.0).min(full.height() / 720.0) }
+
+fn image_button(ui: &mut egui::Ui, rect: egui::Rect, tex: Option<&egui::TextureHandle>, id: &str, tip: &str, on: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
+    if let Some(tex) = tex {
+        let tint = if hit.hovered() { egui::Color32::from_rgb(235, 235, 235) } else { egui::Color32::WHITE };
+        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), tint);
+    } else {
+        glass(ui.painter(), rect, 8.0, glass_fill());
+    }
+    if on {
+        ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside);
+    }
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let clicked = hit.clicked();
+    hit.on_hover_text(tip);
+    clicked
 }
 
 fn style_ui(ctx: &egui::Context) {
@@ -1467,7 +1499,7 @@ fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::T
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    let opts = if name == "mark" || name == "avatar" { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
+    let opts = if name == "mark" || name == "avatar" || name == "grass" { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
     Some(ctx.load_texture(name, color, opts))
 }
 

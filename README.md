@@ -64,7 +64,7 @@ These pictures are the Rus window itself, captured from the native program (`rus
 
 | Area | What you get |
 |---|---|
-| **Window** | Home, Versions, Mods, Settings. Left sidebar. English. [Mozilla Headline](https://github.com/mozilla/mozilla-type-family). |
+| **Window** | Home, Version, Mod, Settings, over the collection wallpaper. English. [Lexend](https://fonts.google.com/specimen/Lexend) and [Nunito Sans](https://fonts.google.com/specimen/Nunito+Sans), the same families [hytale.com](https://hytale.com/) serves. |
 | **Account** | Local only. Default skin Steve. Import a PNG skin or cape. One sample cape, Rus, in the real 64×32 layout. A CPU 3D preview, classic or slim. |
 | **Versions** | Releases always. Snapshots and previews from series 26 up, hidden until Settings turns them on. |
 | **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
@@ -121,8 +121,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.5.0/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.5.0/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.0/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.0/rus-windows-x64.exe) |
 
 Linux:
 
@@ -137,4 +137,4 @@ Windows: run `rus-windows-x64.exe`. It opens the Rus window. It does not open a 
 
 MIT. See [LICENSE](LICENSE).
 
-Mozilla Headline is used under the SIL Open Font License. Collection wallpapers stay on minecraft.net and are cached only in the data folder. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
+Lexend and Nunito Sans are used under the SIL Open Font License. The files are the families served by hytale.com. Collection wallpapers stay on minecraft.net and are cached only in the data folder. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
