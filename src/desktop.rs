@@ -1813,7 +1813,9 @@ fn spawn_mods(app: Arc<App>, tx: Sender<Msg>) {
 
 fn spawn_papers(dir: std::path::PathBuf, tx: Sender<Msg>) {
     std::thread::spawn(move || {
-        for paper in wallpapers::all() {
+        let mut papers: Vec<_> = wallpapers::all().iter().collect();
+        papers.sort_by_key(|p| if p.title == "Wilderness Bound" { 0 } else if !p.prefixes.is_empty() { 1 } else { 2 });
+        for paper in papers {
             if let Ok(bytes) = wallpapers::load_cached(&dir, paper) {
                 let _ = tx.send(Msg::Paper { title: paper.title.into(), bytes });
             }
