@@ -83,6 +83,11 @@ struct Desktop {
     papers: HashMap<String, egui::TextureHandle>,
     mark: Option<egui::TextureHandle>,
     grass: Option<egui::TextureHandle>,
+    icon_forge: Option<egui::TextureHandle>,
+    icon_fabric: Option<egui::TextureHandle>,
+    icon_neoforge: Option<egui::TextureHandle>,
+    icon_optifine: Option<egui::TextureHandle>,
+    loader: String,
     servers: Vec<ServerEntry>,
     server_icons: HashMap<String, egui::TextureHandle>,
     server_name: String,
@@ -159,6 +164,11 @@ impl Desktop {
             papers: HashMap::new(),
             mark: load_texture(&cc.egui_ctx, "mark", include_bytes!("../assets/mark-32.png")),
             grass: load_texture(&cc.egui_ctx, "vanilla", include_bytes!("../assets/vanilla-grass.png")),
+            icon_forge: load_texture(&cc.egui_ctx, "forge", include_bytes!("../assets/loader-forge.png")),
+            icon_fabric: load_texture(&cc.egui_ctx, "fabric", include_bytes!("../assets/loader-fabric.png")),
+            icon_neoforge: load_texture(&cc.egui_ctx, "neoforge", include_bytes!("../assets/loader-neoforge.png")),
+            icon_optifine: load_texture(&cc.egui_ctx, "optifine", include_bytes!("../assets/loader-optifine.png")),
+            loader: if settings.loader.is_empty() { "vanilla".into() } else { settings.loader },
             servers: app.load_servers(),
             server_icons: HashMap::new(),
             server_name: String::new(),
@@ -239,6 +249,7 @@ impl Desktop {
         s.skin = self.skin.clone();
         s.cape = self.cape.clone();
         s.engine = self.engine.clone();
+        s.loader = self.loader.clone();
         s.last_version = self.selected.clone();
         s.skin_model = match self.preview.arms {
             ArmModel::Slim => "slim".into(),
@@ -251,6 +262,16 @@ impl Desktop {
     }
 
     fn paper_for(&self, id: &str) -> &'static Paper { wallpapers::for_version(id) }
+
+    fn loader_icon(&self) -> Option<&egui::TextureHandle> {
+        match self.loader.as_str() {
+            "forge" => self.icon_forge.as_ref(),
+            "fabric" => self.icon_fabric.as_ref(),
+            "neoforge" => self.icon_neoforge.as_ref(),
+            "optifine" => self.icon_optifine.as_ref(),
+            _ => self.grass.as_ref(),
+        }
+    }
 
     fn launch_selected(&mut self) {
         self.save_settings();
@@ -589,7 +610,7 @@ impl Desktop {
     fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
         let paper = self.paper_for(&self.selected);
         if let Some(tex) = self.papers.get(paper.title) {
-            ui.painter().image(tex.id(), full, zoomed_cover(tex.size_vec2(), full, 1.62), egui::Color32::WHITE);
+            ui.painter().image(tex.id(), full, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         } else {
             ui.painter().rect_filled(full, 0.0, BG);
             ui.painter().text(
@@ -635,12 +656,12 @@ impl Desktop {
         let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 632.0)), egui::vec2(us(full, 470.0), us(full, 64.0)));
         let card_hit = ui.interact(card, egui::Id::new("instance-card"), Sense::click());
         glass(ui.painter(), card, 10.0, if card_hit.hovered() { glass_hover() } else { glass_fill() });
-        if let Some(grass) = &self.grass {
-            let icon = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 36.0), card.center().y), egui::vec2(us(full, 42.0), us(full, 42.0)));
-            ui.painter().image(grass.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 36.0), card.center().y), egui::vec2(us(full, 42.0), us(full, 42.0)));
+        if let Some(icon) = self.loader_icon() {
+            ui.painter().image(icon.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        let engine = if horizon_on { "HORIZON" } else { "VANILLA" };
-        ui.painter().text(egui::pos2(card.left() + us(full, 64.0), card.center().y), egui::Align2::LEFT_CENTER, engine, lexend(us(full, 15.0)), GOLD);
+        let engine = crate::state::loader_label(&self.loader);
+        ui.painter().text(egui::pos2(card.left() + us(full, 64.0), card.center().y), egui::Align2::LEFT_CENTER, engine, lexend(us(full, 14.0)), GOLD);
         ui.painter().text(egui::pos2(card.left() + us(full, 168.0), card.center().y), egui::Align2::LEFT_CENTER, &self.selected, lexend(us(full, 20.0)), TEXT);
         ui.painter().line_segment(
             [egui::pos2(card.left() + us(full, 250.0), card.center().y - 12.0), egui::pos2(card.left() + us(full, 250.0), card.center().y + 12.0)],
@@ -649,9 +670,15 @@ impl Desktop {
         paint_clock(ui.painter(), egui::pos2(card.left() + us(full, 278.0), card.center().y), GOLD);
         ui.painter().text(egui::pos2(card.left() + us(full, 296.0), card.center().y), egui::Align2::LEFT_CENTER, "0.0 H", lexend(us(full, 16.0)), TEXT);
         if card_hit.clicked() {
-            self.tab = Tab::Versions;
+            let at = card_hit.interact_pointer_pos().unwrap_or(card.center());
+            if icon_rect.contains(at) {
+                self.loader = crate::state::next_loader(&self.loader).into();
+                self.save_settings();
+            } else {
+                self.tab = Tab::Versions;
+            }
         }
-        card_hit.on_hover_text("Choose a version");
+        card_hit.on_hover_text("Click the icon to change the loader. Click the card to choose a version.");
 
         let play = egui::Rect::from_min_size(egui::pos2(ux(full, 990.0), uy(full, 622.0)), egui::vec2(us(full, 263.0), us(full, 75.0)));
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -999,7 +1026,17 @@ impl Desktop {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
         ui.label(RichText::new("Mod").size(28.0).color(TEXT));
-        ui.label(RichText::new("Enabled jars are staged into the instance when you play.").size(15.0).color(MUTED));
+        ui.label(RichText::new("The home card icon is the loader. Jars are staged when you play.").size(15.0).color(MUTED));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            for (id, label) in [("vanilla", "Vanilla"), ("forge", "Forge"), ("fabric", "Fabric"), ("neoforge", "NeoForge"), ("optifine", "OptiFine")] {
+                let on = self.loader == id;
+                if button(ui, label, 108.0, 40.0, on) {
+                    self.loader = id.into();
+                    self.save_settings();
+                }
+            }
+        });
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             if button(ui, "Open folder", 140.0, 44.0, false) {
@@ -1552,11 +1589,12 @@ fn window_edges(ctx: &egui::Context) {
     });
 }
 
-fn zoomed_cover(src: egui::Vec2, dst: egui::Rect, zoom: f32) -> egui::Rect {
-    let uv = cover_uv(src, dst);
-    let zoom = zoom.max(1.0);
-    let size = uv.size() / zoom;
-    egui::Rect::from_center_size(uv.center(), size)
+fn contain_rect(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
+    if src.x <= 0.0 || src.y <= 0.0 || dst.width() <= 0.0 || dst.height() <= 0.0 {
+        return dst;
+    }
+    let scale = (dst.width() / src.x).min(dst.height() / src.y);
+    egui::Rect::from_center_size(dst.center(), src * scale)
 }
 
 fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {

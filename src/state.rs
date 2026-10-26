@@ -55,10 +55,33 @@ pub struct Settings {
     /// vanilla | horizon
     #[serde(default = "default_engine")]
     pub engine: String,
+    /// vanilla | forge | fabric | neoforge | optifine
+    #[serde(default = "default_loader")]
+    pub loader: String,
 }
 
 fn default_engine() -> String {
     "vanilla".into()
+}
+
+fn default_loader() -> String {
+    "vanilla".into()
+}
+
+pub fn loader_label(id: &str) -> &'static str {
+    match id {
+        "forge" => "FORGE",
+        "fabric" => "FABRIC",
+        "neoforge" => "NEOFORGE",
+        "optifine" => "OPTIFINE",
+        _ => "VANILLA",
+    }
+}
+
+pub fn next_loader(id: &str) -> &'static str {
+    let order = ["vanilla", "forge", "fabric", "neoforge", "optifine"];
+    let i = order.iter().position(|s| *s == id).unwrap_or(0);
+    order[(i + 1) % order.len()]
 }
 
 impl Default for Settings {
@@ -80,6 +103,7 @@ impl Default for Settings {
             last_version: String::new(),
             demo: false,
             engine: "vanilla".into(),
+            loader: "vanilla".into(),
         }
     }
 }
