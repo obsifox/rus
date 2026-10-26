@@ -134,7 +134,12 @@ pub fn build_command(app: &App, id: &str) -> Result<(Command, PathBuf), String> 
     feats.insert("is_demo_user".into(), settings.demo);
     feats.insert("has_custom_resolution".into(), settings.width > 0 && settings.height > 0);
 
-    let mut cmd = Command::new(&javaw);
+    let (bin, prefix, seal) = crate::sandbox::prepare(&javaw, app);
+    let mut cmd = Command::new(&bin);
+    for arg in prefix {
+        cmd.arg(arg);
+    }
+    crate::sandbox::apply_env(&mut cmd, app);
     // memory + user jvm args
     cmd.arg(format!("-Xmx{}M", settings.ram_mb.max(512)));
     cmd.arg(format!("-Xms{}M", (settings.ram_mb / 2).max(256)));
@@ -247,7 +252,8 @@ pub fn build_command(app: &App, id: &str) -> Result<(Command, PathBuf), String> 
     let _ = fs::write(
         &log_path,
         format!(
-            "launcher: {id}\njava: {}\ncmd: {} {}\n\n",
+            "launcher: {id}\nsandbox: {}\njava: {}\ncmd: {} {}\n\n",
+            seal.label,
             javaw.display(),
             javaw.display(),
             argv.join(" ")
@@ -297,6 +303,7 @@ pub fn launch(app: &App, id: &str) -> Result<serde_json::Value, String> {
     let (mut cmd, javaw) = build_command(app, id)?;
     let log_path = app.p(&format!("logs/{id}.log"));
     let child = cmd.spawn().map_err(|e| format!("Failed to start Java: {e}"))?;
+    crate::sandbox::attach(&child);
     let pid = child.id();
     *running().lock().unwrap() = Some(Running {
         version: id.to_string(),
@@ -337,9 +344,10 @@ pub fn status() -> serde_json::Value {
 }
 
 pub fn kill() -> Result<(), String> {
+    crate::sandbox::terminate();
     let mut r = running().lock().unwrap();
     if let Some(p) = r.as_mut() {
-        p.child.kill().map_err(|e| e.to_string())?;
+        let _ = p.child.kill();
     }
     *r = None;
     Ok(())

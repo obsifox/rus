@@ -210,9 +210,14 @@ fn run(app: &App) -> Result<(), String> {
     let resources = find_resources(app).ok_or("Horizon prepared no resources. Check the log and try again.")?;
     set_phase("launching", 0.94, "Launching Horizon…");
     let settings = app.settings();
-    let mut cmd = Command::new(&client);
-    cmd.current_dir(&bin_dir)
-        .arg("--resources")
+    let (bin, prefix, seal) = crate::sandbox::prepare(&client, app);
+    let mut cmd = Command::new(&bin);
+    cmd.current_dir(&bin_dir);
+    for arg in prefix {
+        cmd.arg(arg);
+    }
+    crate::sandbox::apply_env(&mut cmd, app);
+    cmd.arg("--resources")
         .arg(&resources)
         .arg("--name")
         .arg(&settings.username)
@@ -231,7 +236,8 @@ fn run(app: &App) -> Result<(), String> {
     let _ = fs::write(
         &log_path,
         format!(
-            "engine: horizon\nclient: {}\nresources: {}\n\n",
+            "engine: horizon\nsandbox: {}\nclient: {}\nresources: {}\n\n",
+            seal.label,
             client.display(),
             resources.display()
         ),
@@ -242,6 +248,7 @@ fn run(app: &App) -> Result<(), String> {
         }
     }
     let child = cmd.spawn().map_err(|e| format!("Failed to start Horizon: {e}"))?;
+    crate::sandbox::attach(&child);
     let pid = child.id();
     play::adopt("26.3", "horizon", child);
     if let Ok(mut j) = job().lock() {

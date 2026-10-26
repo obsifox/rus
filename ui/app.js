@@ -24,6 +24,7 @@ const S = {
   job: null,
   jobTimer: null,
   horizonTimer: null,
+  sandbox: null,
 };
 
 const PRESETS = [
@@ -183,10 +184,34 @@ function paintChrome() {
   $$('.engine-btn').forEach((b) => b.classList.toggle('is-on', b.dataset.engine === engine()));
   const hz = S.horizon || {};
   $('#engineNote').textContent = engine() === 'horizon'
-    ? (hz.prepared ? 'Rust client · 26.3 ready' : 'Rust rewrite of 26.3')
-    : 'Official Java client';
-  const btn = $('#playBtn');
+    ? (hz.prepared ? 'Horizon 26.3 · sandboxed' : 'Rust client · sandboxed')
+    : 'Official client · sandboxed';
   const running = S.running && S.running.running;
+  const box = S.sandbox || {};
+  const seal = $('#envSeal');
+  if (seal) {
+    seal.classList.toggle('is-on', !!box.sealed);
+    const label = seal.querySelector('span');
+    if (label) label.textContent = box.label || 'Sandbox';
+  }
+  const envTitle = $('#envTitle');
+  if (envTitle) {
+    envTitle.textContent = running
+      ? `Session · ${S.running.version || 'client'}`
+      : 'Sandbox idle';
+  }
+  const sealLine = $('#sealLine');
+  if (sealLine) sealLine.textContent = box.label || 'Sandbox';
+  const root = $('#envRoot');
+  if (root) root.textContent = box.root || (S.system && S.system.data_dir) || '';
+  const policy = $('#envPolicy');
+  if (policy) {
+    policy.textContent = box.hides_home
+      ? 'Home hidden · network shared · dies with Rus'
+      : 'Private profile · network shared';
+  }
+  paintSession();
+  const btn = $('#playBtn');
   btn.classList.toggle('is-stop', !!running);
   if (running) {
     btn.textContent = 'Stop';
@@ -223,6 +248,20 @@ function pageHead(title, sub) {
   </header>`;
 }
 
+function paintSession() {
+  const title = $('#sessionState');
+  const note = $('#sessionNote');
+  const floor = $('#floor');
+  const running = S.running && S.running.running;
+  if (floor) floor.classList.toggle('is-live', !!running);
+  if (title) title.textContent = running ? `Live · ${S.running.version || 'client'}` : 'Idle';
+  if (note) {
+    note.textContent = running
+      ? `pid ${S.running.pid || '—'} · drawing in the sandbox window`
+      : 'Nothing is running. Play starts the client in this sandbox, not in a browser.';
+  }
+}
+
 function renderHome() {
   const st = S.settings;
   const latest = S.latest || {};
@@ -231,22 +270,36 @@ function renderHome() {
   const java = (S.system && S.system.java) ? 'Java ready' : 'Java missing';
   const hz = S.horizon || {};
   const showSnap = st.show_snapshots && latest.snapshot;
+  const box = S.sandbox || {};
+  const host = box.hostname || '—';
+  const files = box.hides_home ? 'Not mounted' : 'Private profile';
   $('#view').innerHTML = `
-    ${pageHead('Home', 'Local account, versions, skins and mods. One binary.')}
-    <section class="hero">
-      <div class="doll-wrap"><canvas data-doll width="96" height="192"></canvas></div>
-      <div>
-        <div class="page-kicker">Minecraft Java Edition</div>
-        <h2>Play from here.</h2>
-        <p>Rus installs official releases, keeps downloads going if the connection drops, and can start 26.3 with Horizon — the Rust rewrite — from the switch under Play.</p>
-        <div class="chips">
-          <span class="chip ${S.system.java ? 'ok' : 'warn'}">${esc(java)}</span>
-          <span class="chip">Release <strong>${esc(latest.release || '—')}</strong></span>
-          ${showSnap ? `<span class="chip warn">Snapshot <strong>${esc(latest.snapshot)}</strong></span>` : ''}
-          <span class="chip ${hz.installed ? 'ok' : ''}">Horizon ${hz.prepared ? 'ready' : hz.installed ? 'installed' : 'not installed'}</span>
+    <section class="stage">
+      <div class="floor" id="floor">
+        <div class="floor-copy">
+          <div class="page-kicker">Sandbox session</div>
+          <h2 id="sessionState">Idle</h2>
+          <p id="sessionNote">Nothing is running. Play starts the client in this sandbox, not in a browser.</p>
         </div>
+        <div class="doll-wrap"><canvas data-doll width="96" height="192"></canvas></div>
       </div>
+      <aside class="panel policy">
+        <h3>Sandbox</h3>
+        <p class="hint">${esc(box.detail || 'Checking the jail…')}</p>
+        <div class="pol"><span>Isolation</span><b>${esc(box.label || 'Sandbox')}</b></div>
+        <div class="pol"><span>Hostname</span><b>${esc(host)}</b></div>
+        <div class="pol"><span>Your files</span><b>${esc(files)}</b></div>
+        <div class="pol"><span>Network</span><b>Shared</b></div>
+        <div class="pol"><span>Window</span><b>Own window</b></div>
+        <div class="pol"><span>Lifetime</span><b>${box.dies_with_rus ? 'Dies with Rus' : 'Private profile'}</b></div>
+      </aside>
     </section>
+    <div class="chips" style="margin: 14px 0">
+      <span class="chip ${S.system.java ? 'ok' : 'warn'}">${esc(java)}</span>
+      <span class="chip">Release <strong>${esc(latest.release || '—')}</strong></span>
+      ${showSnap ? `<span class="chip warn">Snapshot <strong>${esc(latest.snapshot)}</strong></span>` : ''}
+      <span class="chip ${hz.installed ? 'ok' : ''}">Horizon ${hz.prepared ? 'ready' : hz.installed ? 'installed' : 'not installed'}</span>
+    </div>
     <section class="stats">
       <div class="stat"><span>Memory</span><b>${st.ram_mb || 0}<small style="font-size:14px;color:var(--muted)"> MB</small></b></div>
       <div class="stat"><span>Mods on</span><b>${mods}</b></div>
@@ -267,6 +320,7 @@ function renderHome() {
     </section>`;
   $$('[data-install]').forEach((b) => (b.onclick = () => openInstall(b.dataset.install)));
   paintAvatars();
+  paintSession();
 }
 
 function filteredVersions() {
@@ -645,7 +699,7 @@ async function doPlay() {
   }
   try {
     const r = await api('/api/play', { version: v, engine: 'vanilla' });
-    toast(`Started ${v}`);
+    toast(`Started ${v} in the sandbox`);
     S.selected = v;
     pollRunning();
     paintChrome();

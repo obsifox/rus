@@ -11,6 +11,7 @@ mod mods;
 mod mojang;
 mod net;
 mod play;
+mod sandbox;
 mod server;
 mod skin;
 mod state;
@@ -19,7 +20,7 @@ mod state;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Rus {}\n\n  --port <n>     listen port (default 8899, 0 = random)\n  --open        open the UI in the default browser\n  --dir <path>   data directory (default ~/.rus, or %APPDATA%\\Rus on Windows)\n", env!("CARGO_PKG_VERSION"));
+        println!("Rus {}\n\n  --port <n>     listen port (default 8899, 0 = random)\n  --dir <path>   data directory (default ~/.rus, or %APPDATA%\\Rus on Windows)\n\nRus is the environment. It does not open a browser.\nPlay starts the client inside the sandbox.\n", env!("CARGO_PKG_VERSION"));
         return;
     }
     if let Some(i) = args.iter().position(|a| a == "--dir") {
@@ -39,18 +40,6 @@ fn main() {
     let _ = skin::materialize_preset(&app, "skin", "alex");
     let _ = skin::materialize_preset(&app, "cape", "rus");
     println!("data dir → {}", app.dir.display());
-    let url = format!("http://127.0.0.1:{port}/");
-    if args.iter().any(|a| a == "--open") {
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(600));
-            #[cfg(target_os = "linux")]
-            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
-            #[cfg(target_os = "macos")]
-            let _ = std::process::Command::new("open").arg(&url).spawn();
-            #[cfg(target_os = "windows")]
-            let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
-        });
-    }
     if let Err(e) = server::start(app, port) {
         eprintln!("server error: {e}");
         std::process::exit(1);

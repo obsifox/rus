@@ -129,6 +129,7 @@ fn handle(app: Arc<App>, mut req: Request) {
                 "data_dir": app.dir.to_string_lossy(),
                 "game_dir": app.p("game").to_string_lossy(),
                 "version": env!("CARGO_PKG_VERSION"),
+                "sandbox": crate::sandbox::describe(&app),
             });
             return json_resp(req, 200, json!({
                 "settings": s,
@@ -222,6 +223,7 @@ fn handle(app: Arc<App>, mut req: Request) {
         }
         (Method::Get, "/api/horizon") => json_resp(req, 200, horizon::status(&app)),
         (Method::Get, "/api/running") => json_resp(req, 200, play::status()),
+        (Method::Get, "/api/sandbox") => json_resp(req, 200, crate::sandbox::describe(&app)),
         (Method::Post, "/api/kill") => {
             let _ = play::kill();
             json_resp(req, 200, json!({ "ok": true }))
