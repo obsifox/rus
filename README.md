@@ -10,7 +10,7 @@
 
 <p align="center">
   Four tabs, a local account, and the official collection wallpaper for each version.<br>
-  Rus is its own window. It does not open a browser, and it does not serve a page.<br>
+  Rus is its own window. No title bar, no browser, no local page. Exit is a button in the app.<br>
   <i>Not affiliated with Mojang or Microsoft.</i>
 </p>
 
@@ -53,7 +53,7 @@ These pictures are the Rus window itself, captured from the native program (`rus
 
 ## Why Rus
 
-- **A window, not a page.** The interface is native [egui](https://github.com/emilk/egui). Rus never opens a browser and never listens for one.
+- **A window, not a page.** Native [egui](https://github.com/emilk/egui), with the system title bar removed. Drag the sidebar or the wallpaper to move it. **Exit** closes it.
 - **Your account stays local.** Username, Steve or Alex, and the Rus cape. The offline UUID is the vanilla one (`OfflinePlayer:<name>`).
 - **The collection is in the launcher.** Each version shows the official wallpaper for its drop, fetched from [minecraft.net/collectibles](https://www.minecraft.net/en-us/collectibles) into your data folder. The art is not bundled.
 - **Installs survive a dropped connection.** Downloads are 2 MB parts. A failed or corrupt part is fetched again. Finished parts stay.
@@ -117,8 +117,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.2.0/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.2.0/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.3.0/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.3.0/rus-windows-x64.exe) |
 
 Linux:
 
