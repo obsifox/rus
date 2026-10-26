@@ -58,7 +58,7 @@ impl SkinPreview {
             ArmModel::Auto => detected_slim,
         };
         ui.vertical(|ui| {
-            let size = egui::vec2(260.0, 300.0);
+            let size = egui::vec2(220.0, 240.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
             let anim = self.auto_rotate || self.walk;
             if anim {
@@ -148,11 +148,9 @@ impl SkinPreview {
             ui.painter().rect_stroke(
                 rect,
                 8.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(0x23, 0x28, 0x20)),
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(0x3E, 0x6C, 0xA4)),
                 egui::StrokeKind::Inside,
             );
-            resp.clone().on_hover_text("3D preview of skin and cape. Drag to turn, scroll to zoom.");
-
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if view_button(ui, "Front") { self.yaw = 0.0; self.pitch = 0.12; self.dirty = true; }
@@ -189,7 +187,7 @@ fn view_button(ui: &mut egui::Ui, label: &str) -> bool {
 fn model_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
     let mut b = egui::Button::new(label).min_size(egui::vec2(64.0, 28.0));
     if on {
-        b = b.fill(egui::Color32::from_rgb(0xC6, 0xF2, 0x5A));
+        b = b.fill(egui::Color32::from_rgb(0x3B, 0x82, 0xF6));
     }
     ui.add(b).clicked()
 }

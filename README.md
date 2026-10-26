@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  Four tabs, a local account, a 3D skin preview, and the official collection wallpaper for each version.<br>
-  Rus is its own window. No title bar, no browser, no local page. Exit is a small button in the app.<br>
+  Four tabs over the official collection wallpaper, a local account, and a 3D skin preview.<br>
+  Rus is its own window. No title bar, no browser, no local page. Exit is a button in the app.<br>
   <i>Not affiliated with Mojang or Microsoft.</i>
 </p>
 
@@ -33,8 +33,8 @@
 <br>
 
 <p align="center">
-  <img src="docs/home.png" alt="Rus home: pixel R sidebar, Wilderness Bound collection wallpaper for 26.3, and a strip of official Minecraft collection wallpapers" width="100%">
-  <br><sub><b>Home.</b> The selected version’s official wallpaper, from the Minecraft collection, inside the Rus window.</sub>
+  <img src="docs/home.png" alt="Rus home: collection wallpaper, glass navigation, and a blue Play button" width="100%">
+  <br><sub><b>Home.</b> The selected version’s official wallpaper fills the window. Play sits on the art.</sub>
 </p>
 
 ## A tour
@@ -121,8 +121,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.4.0/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.4.0/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.5.0/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.5.0/rus-windows-x64.exe) |
 
 Linux:
 

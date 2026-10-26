@@ -12,19 +12,21 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const BG: egui::Color32 = egui::Color32::from_rgb(0x0B, 0x0D, 0x0A);
-const RAIL: egui::Color32 = egui::Color32::from_rgb(0x10, 0x13, 0x0E);
-const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x13, 0x17, 0x10);
-const SURFACE2: egui::Color32 = egui::Color32::from_rgb(0x17, 0x1B, 0x13);
-const SELECTED: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x22, 0x17);
-const BORDER: egui::Color32 = egui::Color32::from_rgb(0x23, 0x28, 0x20);
-const BORDER_BTN: egui::Color32 = egui::Color32::from_rgb(0x2C, 0x33, 0x26);
-const BORDER_INPUT: egui::Color32 = egui::Color32::from_rgb(0x4A, 0x52, 0x42);
-const MARKER_OFF: egui::Color32 = egui::Color32::from_rgb(0x3A, 0x40, 0x34);
-const TEXT: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xF2, 0xE6);
-const MUTED: egui::Color32 = egui::Color32::from_rgb(0xA9, 0xB1, 0xA0);
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xC6, 0xF2, 0x5A);
-const ON_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x0B, 0x0D, 0x0A);
+const BG: egui::Color32 = egui::Color32::from_rgb(0x08, 0x10, 0x1C);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x10, 0x1A, 0x2C);
+const SURFACE2: egui::Color32 = egui::Color32::from_rgb(0x16, 0x24, 0x3A);
+const SELECTED: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x30, 0x4E);
+const BORDER: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x52, 0x80);
+const BORDER_BTN: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x6C, 0xA4);
+const BORDER_INPUT: egui::Color32 = egui::Color32::from_rgb(0x4A, 0x74, 0xB0);
+const MARKER_OFF: egui::Color32 = egui::Color32::from_rgb(0x2A, 0x40, 0x5C);
+const TEXT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
+const MUTED: egui::Color32 = egui::Color32::from_rgb(0xB4, 0xC2, 0xD4);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3B, 0x82, 0xF6);
+const ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
+const GOLD: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xBA, 0x4E);
+fn glass_fill() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(12, 22, 40, 228) }
+fn glass_hover() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(22, 38, 64, 236) }
 const ERR: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xA0, 0x98);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,8 +49,8 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::Home => "Home",
-            Tab::Versions => "Versions",
-            Tab::Mods => "Mods",
+            Tab::Versions => "Version",
+            Tab::Mods => "Mod",
             Tab::Settings => "Settings",
         }
     }
@@ -80,6 +82,7 @@ struct Desktop {
     selected: String,
     papers: HashMap<String, egui::TextureHandle>,
     mark: Option<egui::TextureHandle>,
+    grass: Option<egui::TextureHandle>,
     avatar: Option<egui::TextureHandle>,
     avatar_key: String,
     mods: Vec<(String, bool, u64)>,
@@ -107,8 +110,8 @@ struct Desktop {
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
     let viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1280.0, 760.0])
-        .with_min_inner_size([1100.0, 680.0])
+        .with_inner_size([1280.0, 720.0])
+        .with_min_inner_size([1100.0, 640.0])
         .with_decorations(false)
         .with_resizable(true)
         .with_title("Rus")
@@ -148,6 +151,7 @@ impl Desktop {
             selected,
             papers: HashMap::new(),
             mark: load_texture(&cc.egui_ctx, "mark", include_bytes!("../assets/mark-32.png")),
+            grass: Some(grass_texture(&cc.egui_ctx)),
             avatar: None,
             avatar_key: String::new(),
             mods: Vec::new(),
@@ -395,19 +399,9 @@ impl eframe::App for Desktop {
             }
         }
 
-        egui::SidePanel::left("side")
-            .exact_width(232.0)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(RAIL).inner_margin(16.0))
-            .show(ctx, |ui| self.sidebar(ui));
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG))
-            .show(ctx, |ui| match self.tab {
-                Tab::Home => self.page_home(ui),
-                Tab::Versions => self.page_versions(ui),
-                Tab::Mods => self.page_mods(ui),
-                Tab::Settings => self.page_settings(ui),
-            });
+            .show(ctx, |ui| self.shell(ui));
         window_edges(ctx);
         paint_frame(ctx);
         self.frames += 1;
@@ -432,6 +426,219 @@ impl eframe::App for Desktop {
 }
 
 impl Desktop {
+    fn shell(&mut self, ui: &mut egui::Ui) {
+        let full = ui.max_rect();
+        let _ = ui.allocate_rect(full, Sense::hover());
+        self.paint_wallpaper(ui, full);
+        let drag = ui.interact(full, egui::Id::new("window-drag"), Sense::click_and_drag());
+        if drag.drag_started() {
+            ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+        }
+        if drag.double_clicked() {
+            toggle_max(ui.ctx());
+        }
+
+        let margin = 16.0;
+        let top = 16.0;
+        let bar_h = 52.0;
+        let rail = 46.0;
+        let bottom_h = 58.0;
+        let content = egui::Rect::from_min_max(
+            egui::pos2(margin, top + bar_h + 14.0),
+            egui::pos2(full.right() - margin - rail - 14.0, full.bottom() - margin - bottom_h - 28.0),
+        );
+        if self.tab != Tab::Home {
+            glass(ui.painter(), content, 14.0, glass_fill());
+            let inner = content.shrink(10.0);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+            child.set_clip_rect(content);
+            match self.tab {
+                Tab::Home => {}
+                Tab::Versions => self.page_versions(&mut child),
+                Tab::Mods => self.page_mods(&mut child),
+                Tab::Settings => self.page_settings(&mut child),
+            }
+        }
+        self.paint_chrome(ui, full);
+    }
+
+    fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
+        let paper = self.paper_for(&self.selected);
+        if let Some(tex) = self.papers.get(paper.title) {
+            ui.painter().image(tex.id(), full, cover_uv(tex.size_vec2(), full), egui::Color32::WHITE);
+        } else {
+            ui.painter().rect_filled(full, 0.0, BG);
+            ui.painter().text(
+                full.center(),
+                egui::Align2::CENTER_CENTER,
+                "Fetching the collection wallpaper…",
+                egui::FontId::proportional(16.0),
+                MUTED,
+            );
+        }
+        // Soft edge so the glass cards stay readable without hiding the art.
+        for i in 0..8 {
+            let t = (i + 1) as f32 / 8.0;
+            let a = (t * 28.0) as u8;
+            let band = 18.0;
+            let y0 = full.top() + i as f32 * band;
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(egui::pos2(full.left(), y0), egui::pos2(full.right(), y0 + band)),
+                0.0,
+                egui::Color32::from_black_alpha(a / 3),
+            );
+            let y1 = full.bottom() - (i as f32 + 1.0) * band;
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(egui::pos2(full.left(), y1), egui::pos2(full.right(), y1 + band)),
+                0.0,
+                egui::Color32::from_black_alpha(a),
+            );
+        }
+    }
+
+    fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let margin = 16.0;
+        let top = 16.0;
+        let bar_h = 52.0;
+        self.account_bar(ui, egui::pos2(margin, top), bar_h);
+        self.nav_bar(ui, egui::pos2(margin + 188.0, top), bar_h);
+        let exit = egui::Rect::from_min_size(egui::pos2(full.right() - margin - 46.0, top + 3.0), egui::vec2(46.0, 46.0));
+        if icon_button(ui, exit, "exit", false, "Exit") {
+            self.quit(ui.ctx());
+        }
+        paint_exit_icon(ui.painter(), exit.center(), TEXT);
+
+        let rail_x = full.right() - margin - 46.0;
+        let rail_y = 168.0;
+        let horizon_on = self.engine == "horizon";
+        let hrect = egui::Rect::from_min_size(egui::pos2(rail_x, rail_y), egui::vec2(46.0, 46.0));
+        if icon_button(ui, hrect, "rail-horizon", horizon_on, "Horizon") {
+            self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
+            self.save_settings();
+        }
+        ui.painter().text(hrect.center(), egui::Align2::CENTER_CENTER, "H", egui::FontId::proportional(22.0), GOLD);
+
+        let mrect = hrect.translate(egui::vec2(0.0, 56.0));
+        if icon_button(ui, mrect, "rail-mod", self.tab == Tab::Mods, "Mod") {
+            self.tab = Tab::Mods;
+        }
+        paint_creature(ui.painter(), mrect.center());
+
+        let srect = mrect.translate(egui::vec2(0.0, 56.0));
+        if icon_button(ui, srect, "rail-settings", self.tab == Tab::Settings, "Settings") {
+            self.tab = Tab::Settings;
+        }
+        paint_crest(ui.painter(), srect.center());
+
+        let card = egui::Rect::from_min_size(egui::pos2(margin, full.bottom() - margin - 58.0), egui::vec2(430.0, 58.0));
+        let card_hit = ui.interact(card, egui::Id::new("instance-card"), Sense::click());
+        glass(ui.painter(), card, 12.0, if card_hit.hovered() { glass_hover() } else { glass_fill() });
+        if let Some(grass) = &self.grass {
+            let icon = egui::Rect::from_center_size(egui::pos2(card.left() + 32.0, card.center().y), egui::vec2(30.0, 30.0));
+            ui.painter().image(grass.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        }
+        let engine = if horizon_on { "HORIZON" } else { "VANILLA" };
+        ui.painter().text(egui::pos2(card.left() + 58.0, card.center().y), egui::Align2::LEFT_CENTER, engine, egui::FontId::proportional(15.0), GOLD);
+        ui.painter().text(egui::pos2(card.left() + 168.0, card.center().y), egui::Align2::LEFT_CENTER, &self.selected, egui::FontId::proportional(18.0), TEXT);
+        ui.painter().line_segment(
+            [egui::pos2(card.left() + 250.0, card.center().y - 12.0), egui::pos2(card.left() + 250.0, card.center().y + 12.0)],
+            egui::Stroke::new(1.0, BORDER_BTN),
+        );
+        paint_clock(ui.painter(), egui::pos2(card.left() + 276.0, card.center().y), GOLD);
+        let stat = format!("{} GB", (self.ram as f32 / 1024.0).round() as u32);
+        ui.painter().text(egui::pos2(card.left() + 294.0, card.center().y), egui::Align2::LEFT_CENTER, &stat, egui::FontId::proportional(16.0), TEXT);
+        if card_hit.clicked() {
+            self.tab = Tab::Versions;
+        }
+        card_hit.on_hover_text("Choose a version");
+
+        let play = egui::Rect::from_min_size(egui::pos2(full.right() - margin - 210.0, full.bottom() - margin - 54.0), egui::vec2(210.0, 54.0));
+        let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+        let label = if live { "STOP" } else { "PLAY" };
+        let note = if let Some((progress, line)) = self.job_line() {
+            let _ = progress;
+            line
+        } else if self.notice != "Ready" && !self.notice.is_empty() {
+            self.notice.clone()
+        } else {
+            self.channel_label()
+        };
+        ui.painter().text(egui::pos2(play.right() - 4.0, play.top() - 16.0), egui::Align2::RIGHT_CENTER, &note, egui::FontId::proportional(13.0), MUTED);
+        paint_diamond(ui.painter(), egui::pos2(play.right() - note_width(ui, &note) - 16.0, play.top() - 16.0), GOLD);
+        if play_button(ui, play, label) {
+            self.play();
+        }
+        if let Some((progress, _)) = self.job_line() {
+            let bar = egui::Rect::from_min_max(
+                egui::pos2(play.left(), play.bottom() - 3.0),
+                egui::pos2(play.left() + play.width() * progress.clamp(0.0, 1.0), play.bottom()),
+            );
+            ui.painter().rect_filled(bar, 2.0, egui::Color32::from_white_alpha(180));
+        }
+    }
+
+    fn channel_label(&self) -> String {
+        let raw = self.versions.iter().find(|v| v.id == self.selected).map(|v| v.channel.as_str()).unwrap_or("release");
+        let mut chars = raw.chars();
+        match chars.next() {
+            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            None => "Release".into(),
+        }
+    }
+
+    fn account_bar(&mut self, ui: &mut egui::Ui, origin: egui::Pos2, h: f32) {
+        let name = if self.username.is_empty() { "Player" } else { &self.username };
+        let rect = egui::Rect::from_min_size(origin, egui::vec2(176.0, h));
+        let hit = ui.interact(rect, egui::Id::new("account-chip"), Sense::click());
+        glass(ui.painter(), rect, 12.0, if hit.hovered() { glass_hover() } else { glass_fill() });
+        if let Some(grass) = &self.grass {
+            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 30.0, rect.center().y), egui::vec2(28.0, 28.0));
+            ui.painter().image(grass.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        }
+        ui.painter().text(egui::pos2(rect.left() + 52.0, rect.center().y), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(18.0), TEXT);
+        if hit.clicked() {
+            self.tab = Tab::Settings;
+        }
+        hit.on_hover_text("Local account");
+    }
+
+    fn nav_bar(&mut self, ui: &mut egui::Ui, origin: egui::Pos2, h: f32) {
+        let tabs = [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings];
+        let mut widths = Vec::new();
+        let mut total = 8.0;
+        for tab in tabs {
+            let galley = ui.painter().layout_no_wrap(tab.label().to_string(), egui::FontId::proportional(15.0), TEXT);
+            let w = 18.0 + 8.0 + galley.size().x + 16.0;
+            widths.push(w);
+            total += w + 4.0;
+        }
+        total += 4.0;
+        let rect = egui::Rect::from_min_size(origin, egui::vec2(total, h));
+        glass(ui.painter(), rect, 12.0, glass_fill());
+        let mut x = rect.left() + 6.0;
+        for (i, tab) in tabs.into_iter().enumerate() {
+            let item = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 6.0), egui::vec2(widths[i], h - 12.0));
+            let hit = ui.interact(item, egui::Id::new("nav").with(i), Sense::click());
+            let on = self.tab == tab;
+            if on || hit.hovered() {
+                ui.painter().rect_filled(item, 8.0, if on { SELECTED } else { egui::Color32::from_white_alpha(16) });
+            }
+            let color = if on { TEXT } else { MUTED };
+            let icon_at = egui::pos2(item.left() + 16.0, item.center().y);
+            match tab {
+                Tab::Home => paint_house(ui.painter(), icon_at, color),
+                Tab::Versions => paint_layers(ui.painter(), icon_at, color),
+                Tab::Mods => paint_cube(ui.painter(), icon_at, color),
+                Tab::Settings => paint_gear(ui.painter(), icon_at, color),
+            }
+            ui.painter().text(egui::pos2(item.left() + 30.0, item.center().y), egui::Align2::LEFT_CENTER, tab.label(), egui::FontId::proportional(15.0), color);
+            if hit.clicked() {
+                self.tab = tab;
+            }
+            x += widths[i] + 4.0;
+        }
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         drag_block(ui, 52.0, |ui, rect| {
             if let Some(mark) = &self.mark {
@@ -572,13 +779,13 @@ impl Desktop {
     }
 
     fn page_versions(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap().shrink(28.0);
+        let outer = ui.available_rect_before_wrap().shrink(8.0);
         let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new("Versions").size(28.0).color(TEXT));
+                ui.label(RichText::new("Version").size(28.0).color(TEXT));
                 ui.label(RichText::new(&self.versions_note).size(14.0).color(MUTED));
             });
         });
@@ -647,7 +854,7 @@ impl Desktop {
                 card(ui, |ui| {
                     let paper = wallpapers::for_version(&self.selected);
                     if let Some(tex) = self.papers.get(paper.title) {
-                        ui.add(egui::Image::from_texture((tex.id(), tex.size_vec2())).fit_to_exact_size(egui::vec2(308.0, 160.0)));
+                        ui.add(egui::Image::from_texture((tex.id(), tex.size_vec2())).fit_to_exact_size(egui::vec2(300.0, 72.0)));
                     }
                     ui.add_space(8.0);
                     ui.label(RichText::new(&self.selected).size(22.0).color(TEXT));
@@ -659,13 +866,8 @@ impl Desktop {
                         check(ui, &mut p.enabled, &p.title);
                     }
                     ui.add_space(8.0);
-                    if button(ui, &format!("Install {}", self.selected), 308.0, 44.0, true) {
+                    if button(ui, &format!("Install {}", self.selected), 300.0, 36.0, true) {
                         self.start_install();
-                    }
-                    ui.add_space(6.0);
-                    if button(ui, "Set as selected", 308.0, 44.0, false) {
-                        self.save_settings();
-                        self.notice = format!("{} selected", self.selected);
                     }
                     if let Some((progress, line)) = self.job_line() {
                         ui.add_space(8.0);
@@ -677,11 +879,11 @@ impl Desktop {
     }
 
     fn page_mods(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap().shrink(28.0);
+        let outer = ui.available_rect_before_wrap().shrink(8.0);
         let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
-        ui.label(RichText::new("Mods").size(28.0).color(TEXT));
+        ui.label(RichText::new("Mod").size(28.0).color(TEXT));
         ui.label(RichText::new("Enabled jars are staged into the instance when you play.").size(15.0).color(MUTED));
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -727,7 +929,13 @@ impl Desktop {
             ui.label(RichText::new(format!("{} mods · {enabled} enabled", self.mods.len())).size(13.0).color(MUTED));
         });
         ui.add_space(8.0);
-        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .scroll_bar_visibility(if self.mods.is_empty() {
+                egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+            } else {
+                egui::scroll_area::ScrollBarVisibility::AlwaysVisible
+            })
+            .show(ui, |ui| {
             for (name, on, size) in self.mods.clone() {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -749,7 +957,7 @@ impl Desktop {
     }
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap().shrink(28.0);
+        let outer = ui.available_rect_before_wrap().shrink(8.0);
         let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
         let ui = &mut child;
@@ -883,6 +1091,161 @@ impl Desktop {
     }
 }
 
+fn glass(painter: &egui::Painter, rect: egui::Rect, radius: f32, fill: egui::Color32) {
+    let shadow = rect.translate(egui::vec2(0.0, 4.0));
+    painter.rect_filled(shadow, radius, egui::Color32::from_black_alpha(70));
+    painter.rect_filled(rect, radius, fill);
+    painter.rect_stroke(rect, radius, egui::Stroke::new(1.5, BORDER_BTN), egui::StrokeKind::Inside);
+}
+
+fn icon_button(ui: &mut egui::Ui, rect: egui::Rect, id: &str, on: bool, tip: &str) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
+    let fill = if on { SELECTED } else if hit.hovered() { glass_hover() } else { glass_fill() };
+    glass(ui.painter(), rect, 10.0, fill);
+    if on {
+        ui.painter().rect_stroke(rect, 10.0, egui::Stroke::new(1.5, ACCENT), egui::StrokeKind::Inside);
+    }
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let clicked = hit.clicked();
+    hit.on_hover_text(tip);
+    clicked
+}
+
+fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("play"), Sense::click());
+    let fill = if hit.hovered() { egui::Color32::from_rgb(0x5B, 0x9B, 0xFF) } else { ACCENT };
+    let shadow = rect.translate(egui::vec2(0.0, 3.0));
+    ui.painter().rect_filled(shadow, 10.0, egui::Color32::from_black_alpha(80));
+    ui.painter().rect_filled(rect, 10.0, fill);
+    let tri = rect.center() + egui::vec2(-28.0, 0.0);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![tri + egui::vec2(-6.0, -8.0), tri + egui::vec2(-6.0, 8.0), tri + egui::vec2(8.0, 0.0)],
+        ON_ACCENT,
+        egui::Stroke::NONE,
+    ));
+    ui.painter().text(rect.center() + egui::vec2(10.0, 0.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(20.0), ON_ACCENT);
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+fn note_width(ui: &egui::Ui, text: &str) -> f32 {
+    ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), MUTED).size().x
+}
+
+fn paint_exit_icon(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
+    let s = egui::Stroke::new(1.6, color);
+    let box_r = egui::Rect::from_center_size(center + egui::vec2(-2.0, 1.0), egui::vec2(12.0, 14.0));
+    painter.rect_stroke(box_r, 1.0, s, egui::StrokeKind::Inside);
+    painter.line_segment([center + egui::vec2(-1.0, 1.0), center + egui::vec2(8.0, 1.0)], s);
+    painter.line_segment([center + egui::vec2(4.0, -3.0), center + egui::vec2(8.0, 1.0)], s);
+    painter.line_segment([center + egui::vec2(4.0, 5.0), center + egui::vec2(8.0, 1.0)], s);
+}
+
+fn paint_house(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
+    let s = egui::Stroke::new(1.6, color);
+    painter.add(egui::Shape::convex_polygon(
+        vec![c + egui::vec2(0.0, -7.0), c + egui::vec2(-8.0, 0.0), c + egui::vec2(8.0, 0.0)],
+        egui::Color32::TRANSPARENT,
+        s,
+    ));
+    painter.line_segment([c + egui::vec2(-6.0, 0.0), c + egui::vec2(-6.0, 7.0)], s);
+    painter.line_segment([c + egui::vec2(6.0, 0.0), c + egui::vec2(6.0, 7.0)], s);
+    painter.line_segment([c + egui::vec2(-6.0, 7.0), c + egui::vec2(6.0, 7.0)], s);
+}
+
+fn paint_layers(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
+    let s = egui::Stroke::new(1.5, color);
+    for dy in [-5.0, 0.0, 5.0] {
+        painter.line_segment([c + egui::vec2(-7.0, dy), c + egui::vec2(7.0, dy)], s);
+    }
+}
+
+fn paint_cube(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
+    let s = egui::Stroke::new(1.5, color);
+    let pts = [
+        c + egui::vec2(0.0, -7.0),
+        c + egui::vec2(7.0, -3.0),
+        c + egui::vec2(7.0, 4.0),
+        c + egui::vec2(0.0, 8.0),
+        c + egui::vec2(-7.0, 4.0),
+        c + egui::vec2(-7.0, -3.0),
+    ];
+    for i in 0..6 {
+        painter.line_segment([pts[i], pts[(i + 1) % 6]], s);
+    }
+    painter.line_segment([pts[0], pts[3]], s);
+    painter.line_segment([pts[1], c], s);
+    painter.line_segment([pts[5], c], s);
+}
+
+fn paint_gear(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
+    painter.circle_stroke(c, 4.0, egui::Stroke::new(1.6, color));
+    for i in 0..8 {
+        let a = i as f32 * std::f32::consts::TAU / 8.0;
+        let inner = egui::vec2(a.cos(), a.sin()) * 6.0;
+        let outer = egui::vec2(a.cos(), a.sin()) * 8.5;
+        painter.line_segment([c + inner, c + outer], egui::Stroke::new(1.6, color));
+    }
+}
+
+fn paint_clock(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
+    painter.circle_stroke(c, 7.0, egui::Stroke::new(1.5, color));
+    painter.line_segment([c, c + egui::vec2(0.0, -4.0)], egui::Stroke::new(1.5, color));
+    painter.line_segment([c, c + egui::vec2(3.0, 1.0)], egui::Stroke::new(1.5, color));
+}
+
+fn paint_diamond(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
+    painter.add(egui::Shape::convex_polygon(
+        vec![c + egui::vec2(0.0, -5.0), c + egui::vec2(4.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-4.0, 0.0)],
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
+fn paint_creature(painter: &egui::Painter, c: egui::Pos2) {
+    let green = egui::Color32::from_rgb(0x3D, 0xD6, 0x6A);
+    painter.circle_filled(c + egui::vec2(0.0, 1.0), 8.0, green);
+    painter.circle_filled(c + egui::vec2(-3.0, -6.0), 2.2, green);
+    painter.circle_filled(c + egui::vec2(2.0, -7.0), 1.6, green);
+    painter.circle_filled(c + egui::vec2(-2.0, 0.0), 1.3, egui::Color32::from_rgb(0x0C, 0x2A, 0x14));
+    painter.circle_filled(c + egui::vec2(3.0, 1.0), 1.1, egui::Color32::from_rgb(0x0C, 0x2A, 0x14));
+}
+
+fn paint_crest(painter: &egui::Painter, c: egui::Pos2) {
+    let gold = GOLD;
+    painter.circle_stroke(c, 9.0, egui::Stroke::new(1.6, gold));
+    painter.circle_filled(c, 3.0, egui::Color32::from_rgb(0x7D, 0xD3, 0x6A));
+    painter.line_segment([c + egui::vec2(-5.0, 2.0), c + egui::vec2(0.0, -4.0)], egui::Stroke::new(1.4, gold));
+    painter.line_segment([c + egui::vec2(5.0, 2.0), c + egui::vec2(0.0, -4.0)], egui::Stroke::new(1.4, gold));
+}
+
+fn grass_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    // Front-facing grass block. Original pixels, not a Mojang texture.
+    let mut img = image::RgbaImage::new(16, 16);
+    for y in 0..16 {
+        for x in 0..16 {
+            let grass = y < 6;
+            let edge = x == 0 || x == 15 || y == 0 || y == 15 || y == 5;
+            let c = if grass {
+                if edge { [0x2E, 0x62, 0x1C] } else if (x + y) % 4 == 0 { [0x8E, 0xD2, 0x52] } else { [0x5C, 0xA8, 0x36] }
+            } else if edge {
+                [0x3E, 0x2A, 0x1A]
+            } else if (x * 3 + y) % 5 == 0 {
+                [0xA6, 0x74, 0x48]
+            } else {
+                [0x7A, 0x54, 0x34]
+            };
+            img.put_pixel(x, y, image::Rgba([c[0], c[1], c[2], 255]));
+        }
+    }
+    let color = egui::ColorImage::from_rgba_unmultiplied([16, 16], img.as_raw());
+    ctx.load_texture("grass-block", color, egui::TextureOptions::NEAREST)
+}
+
 fn account_chip(ui: &mut egui::Ui, avatar: Option<&egui::TextureHandle>, name: &str) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), Sense::hover());
     ui.painter().rect_filled(rect, 12.0, SURFACE2);
@@ -932,7 +1295,7 @@ fn field(ui: &mut egui::Ui, text: &mut String, width: f32, hint: &str) -> egui::
 }
 
 fn check(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(180.0), 32.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(180.0), 26.0), Sense::click());
     let box_r = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 6.0), egui::vec2(18.0, 18.0));
     ui.painter().rect_filled(box_r, 3.0, BG);
     ui.painter().rect_stroke(box_r, 3.0, egui::Stroke::new(1.5, if *on { ACCENT } else { BORDER_INPUT }), egui::StrokeKind::Inside);
@@ -1014,7 +1377,7 @@ fn paint_fade(ui: &egui::Ui, rect: egui::Rect) {
 fn paint_frame(ctx: &egui::Context) {
     let rect = ctx.screen_rect();
     ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("frame")))
-        .rect_stroke(rect, 0.0, egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+        .rect_stroke(rect, 0.0, egui::Stroke::new(2.0, BORDER_BTN), egui::StrokeKind::Inside);
 }
 
 fn window_edges(ctx: &egui::Context) {
