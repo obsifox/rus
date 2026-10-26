@@ -1,45 +1,99 @@
-# Rus
+<p align="center">
+  <img src="assets/mark.png" width="128" height="128" alt="Rus mark: a pixel R on a dark tile">
+</p>
 
-A modern Minecraft: Java Edition launcher written in Rust. Rus is its own environment, not a page in your browser. Play starts the client inside a sandbox.
+<h1 align="center">Rus</h1>
 
-English interface. Black, sharp, and quiet. Sidebar on the left. Type is [Mozilla Headline](https://github.com/mozilla/mozilla-type-family) (SIL Open Font License).
+<p align="center">
+  <b>A native Minecraft: Java Edition launcher, written in Rust.</b>
+</p>
 
-Rus is not affiliated with Mojang or Microsoft. You need your own copy of Minecraft, which Rus downloads from Mojang’s servers into your data folder.
+<p align="center">
+  Four tabs, a local account, and the official collection wallpaper for each version.<br>
+  Rus is its own window. It does not open a browser, and it does not serve a page.<br>
+  <i>Not affiliated with Mojang or Microsoft.</i>
+</p>
 
-## Download
+<p align="center">
+  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-2b47b5?style=flat-square&logo=rust&logoColor=white">
+  <img alt="Native window" src="https://img.shields.io/badge/window-native%20%C2%B7%20no%20browser-3b5bdb?style=flat-square">
+  <img alt="Linux and Windows" src="https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20Windows-3b5bdb?style=flat-square">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2b47b5?style=flat-square">
+</p>
 
-| Platform | File |
-| --- | --- |
-| Linux x86-64 | `rus-linux-x86_64` |
-| Windows x64 | `rus-windows-x64.exe` |
+<p align="center">
+  <a href="https://github.com/obsifox/rus/releases/latest"><b>Download</b></a> ·
+  <a href="#a-tour">A tour</a> ·
+  <a href="#why-rus">Why Rus</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#downloads">Downloads</a>
+</p>
 
-Linux:
+<br>
 
-```bash
-chmod +x rus-linux-x86_64
-./rus-linux-x86_64
-```
+<p align="center">
+  <img src="docs/home.png" alt="Rus home: pixel R sidebar, Wilderness Bound collection wallpaper for 26.3, and a strip of official Minecraft collection wallpapers" width="100%">
+  <br><sub><b>Home.</b> The selected version’s official wallpaper, from the Minecraft collection, inside the Rus window.</sub>
+</p>
 
-Windows: run `rus-windows-x64.exe`. Rus does not open a browser.
+## A tour
 
-The binary is the environment. Play starts Minecraft inside the sandbox, not in a browser tab. On Linux, install `bubblewrap` for the kernel jail (`apt install bubblewrap`). Without it, the client still gets a private profile under the data folder. On Windows the client is placed in a job object with that same private profile.
+These pictures are the Rus window itself, captured from the native program (`rus --shot`).
 
-| Flag | |
-| --- | --- |
-| `--port <n>` | Local port. Default `8899`. `0` picks a free port. |
-| `--dir <path>` | Data folder. Default `~/.rus` on Linux, `%APPDATA%\Rus` on Windows. |
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/versions.png" alt="Versions tab with each release beside its collection wallpaper, and install patches that can be turned off" width="100%"><p align="center"><sub><b>Versions.</b> Releases, with the collection art for that drop. Snapshots stay hidden until Settings turns them on.</sub></p></td>
+<td width="50%" valign="top"><img src="docs/settings.png" alt="Settings tab with username, memory, window size, snapshot toggle, Steve skin and the Rus cape" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, skin and cape. No Microsoft login.</sub></p></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/mods.png" alt="Mods tab, empty, pointing at the Rus mods folder" width="100%"><p align="center"><sub><b>Mods.</b> Jars in the Rus mods folder. Enabled ones are staged when you play.</sub></p></td>
+</tr>
+</table>
+
+## Why Rus
+
+- **A window, not a page.** The interface is native [egui](https://github.com/emilk/egui). Rus never opens a browser and never listens for one.
+- **Your account stays local.** Username, Steve or Alex, and the Rus cape. The offline UUID is the vanilla one (`OfflinePlayer:<name>`).
+- **The collection is in the launcher.** Each version shows the official wallpaper for its drop, fetched from [minecraft.net/collectibles](https://www.minecraft.net/en-us/collectibles) into your data folder. The art is not bundled.
+- **Installs survive a dropped connection.** Downloads are 2 MB parts. A failed or corrupt part is fetched again. Finished parts stay.
+- **The client is sandboxed.** On Linux, bubblewrap gives the game its own mount, pid and hostname (`rus-sandbox`). Your home directory is not mounted. On Windows the client sits in a job object with a private profile under Rus.
+- **26.3 can start in Horizon.** The switch beside Play uses the unofficial [Horizon](https://github.com/ludovic111/horizon) client when you want it. Vanilla stays installed.
 
 ## What it does
 
-Four pages: **Home**, **Versions**, **Mods**, **Settings**.
+| Area | What you get |
+|---|---|
+| **Window** | Home, Versions, Mods, Settings. Left sidebar. English. [Mozilla Headline](https://github.com/mozilla/mozilla-type-family). |
+| **Account** | Local only. Default skin Steve. One sample cape, Rus, in the real 64×32 cape layout. |
+| **Versions** | Releases always. Snapshots and previews from series 26 up, hidden until Settings turns them on. |
+| **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
+| **Play** | Vanilla Java client, or Horizon for 26.3. Both start outside the browser, inside the sandbox. |
+| **Mods** | A folder of jars. Toggle them. They are staged into the instance when you play. |
 
-- Local account only. The offline UUID matches vanilla (`OfflinePlayer:<name>`).
-- Releases are listed by default. Snapshots and previews from 26 upward appear only after you turn them on in Settings.
-- Default skin is Steve. One bundled cape, **Rus**, in the real 64×32 cape layout. You can upload your own PNG skin or cape.
-- Install is a set of patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Progress is live and cancelable.
-- Large downloads are split into 2 MB parts. A dropped connection or a bad part retries that part only. Finished parts stay on disk, so the next attempt continues instead of starting over.
-- Next to Play: **Vanilla** (the official Java client) or **Horizon** (the Rust rewrite of 26.3). Horizon uses your installed 26.3 files. It does not replace them. [Horizon](https://github.com/ludovic111/horizon) is an unofficial project.
-- Play does not open a browser. On Linux with bubblewrap, the client runs in its own mount, pid and hostname namespaces (`rus-sandbox`). Your home directory is not mounted, and the process dies when Rus exits. On Windows it runs in a job object with a private profile under Rus.
+You need your own copy of Minecraft. Rus downloads it from Mojang into `~/.rus` on Linux, or `%APPDATA%\Rus` on Windows.
+
+## Architecture
+
+```
+src/main.rs        native entry. no browser, no local page
+src/desktop.rs     the window
+src/wallpapers.rs  collection art, cached under the data folder
+src/mojang.rs      version manifest
+src/install.rs     patch pipeline
+src/net.rs         part-by-part downloads
+src/java.rs        Temurin JRE
+src/skin.rs        offline skin pack and the Rus cape
+src/mods.rs        mod library
+src/play.rs        Java command line
+src/sandbox.rs     bubblewrap jail, or a Windows job object
+src/horizon.rs     optional Horizon 26.3 client
+```
+
+| Flag | |
+| --- | --- |
+| `--dir <path>` | Data folder. Default `~/.rus`, or `%APPDATA%\Rus`. |
+| `--help` | Short usage. |
 
 ## Build
 
@@ -50,27 +104,33 @@ cargo build --release
 ./target/release/rus
 ```
 
-Windows from Linux needs the MinGW linker and the `x86_64-pc-windows-gnu` target. `.cargo/config.toml` points the linker at `x86_64-w64-mingw32-gcc`.
+Windows from Linux needs the MinGW linker and the `x86_64-pc-windows-gnu` target.
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-## Layout
+Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a private profile under the data folder.
 
+## Downloads
+
+| Platform | File |
+| --- | --- |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.2.0/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.2.0/rus-windows-x64.exe) |
+
+Linux:
+
+```bash
+chmod +x rus-linux-x86_64
+./rus-linux-x86_64
 ```
-src/main.rs      entry
-src/server.rs    local HTTP API and the embedded UI
-src/mojang.rs    version manifest, releases plus optional 26+ snapshots
-src/install.rs   patch pipeline
-src/net.rs       chunked, resumable downloads
-src/java.rs      Temurin JRE when the system JVM is too old
-src/skin.rs      offline skin pack and the Rus cape
-src/mods.rs      mod library
-src/play.rs      Java command line
-src/sandbox.rs   kernel jail (Linux) or job object (Windows)
-src/horizon.rs   optional Horizon 26.3 client
-ui/              English interface, embedded in the binary
-assets/          Mozilla Headline, Steve, Alex
-```
+
+Windows: run `rus-windows-x64.exe`. It opens the Rus window. It does not open a browser.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+Mozilla Headline is used under the SIL Open Font License. Collection wallpapers stay on minecraft.net and are cached only in the data folder. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
