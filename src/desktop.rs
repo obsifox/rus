@@ -61,14 +61,17 @@ struct Ver {
     id: String,
     channel: String,
     installed: bool,
+    released: String,
 }
 
 enum Msg {
-    Versions(Vec<Ver>),
+    Versions { rows: Vec<Ver>, latest: String },
     VersionsErr(String),
     Paper { title: String, bytes: Vec<u8> },
     Notice(String),
     Mods(Vec<(String, bool, u64)>),
+    Loaders(crate::loaders::Catalog),
+    Fabric(String, String),
 }
 
 struct Desktop {
@@ -78,6 +81,11 @@ struct Desktop {
     tab: Tab,
     versions: Vec<Ver>,
     versions_note: String,
+    version_latest: String,
+    release_view: bool,
+    loaders: crate::loaders::Catalog,
+    loader_after: bool,
+    fabric_wait: String,
     query: String,
     selected: String,
     papers: HashMap<String, egui::TextureHandle>,
@@ -153,13 +161,18 @@ impl Desktop {
         let selected = if settings.last_version.is_empty() { "26.3".into() } else { settings.last_version.clone() };
         let mut preview = SkinPreview::default();
         preview.arms = if settings.skin_model == "slim" { ArmModel::Slim } else if settings.skin == "preset:alex" { ArmModel::Slim } else { ArmModel::Classic };
-        let me = Self {
+        let mut me = Self {
             app: app.clone(),
             tx: tx.clone(),
             rx,
             tab: Tab::from_name(&tab),
             versions: Vec::new(),
             versions_note: "Loading versions…".into(),
+            version_latest: String::new(),
+            release_view: true,
+            loaders: crate::loaders::Catalog::default(),
+            loader_after: false,
+            fabric_wait: String::new(),
             query: String::new(),
             selected,
             papers: HashMap::new(),
@@ -204,21 +217,47 @@ impl Desktop {
         };
         spawn_versions(app.clone(), tx.clone());
         spawn_mods(app.clone(), tx.clone());
+        spawn_loaders(tx.clone());
         spawn_papers(app.dir.clone(), tx);
+        if me.shot.is_some() && me.tab == Tab::Versions {
+            me.loader = "forge".into();
+            me.selected = "26.3".into();
+        }
         me
     }
 
     fn pump(&mut self, ctx: &egui::Context) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Versions(v) => {
+                Msg::Versions { rows, latest } => {
                     if self.selected.is_empty() {
-                        if let Some(first) = v.first() { self.selected = first.id.clone(); }
+                        if let Some(first) = rows.first() { self.selected = first.id.clone(); }
                     }
-                    self.versions_note = format!("{} versions", v.len());
-                    self.versions = v;
+                    self.versions_note = format!("{} versions", rows.len());
+                    self.version_latest = latest;
+                    self.versions = rows;
+                    self.ensure_fabric();
                 }
                 Msg::VersionsErr(e) => self.versions_note = e,
+                Msg::Loaders(cat) => {
+                    let fabric = self.loaders.fabric.clone();
+                    self.loaders = cat;
+                    if self.loaders.fabric.is_empty() {
+                        self.loaders.fabric = fabric;
+                    }
+                    self.ensure_fabric();
+                }
+                Msg::Fabric(mc, version) => {
+                    if self.fabric_wait == mc {
+                        self.fabric_wait.clear();
+                    }
+                    self.loaders.fabric.retain(|(k, _)| k != &mc);
+                    if !version.is_empty() {
+                        self.loaders.fabric.push((mc, version));
+                    } else {
+                        self.loaders.fabric.push((mc, String::new()));
+                    }
+                }
                 Msg::Paper { title, bytes } => {
                     if let Some(tex) = load_texture(ctx, &title, &bytes) {
                         self.papers.insert(title, tex);
@@ -238,6 +277,32 @@ impl Desktop {
                 }
             }
         }
+        if self.loader_after {
+            if let Some(state) = self.job_state() {
+                if state == "done" && self.app.is_installed(&self.selected) {
+                    self.loader_after = false;
+                    self.spawn_loader_install();
+                } else if state == "error" {
+                    self.loader_after = false;
+                }
+            }
+        }
+    }
+
+    fn ensure_fabric(&mut self) {
+        let mc = self.selected.clone();
+        if mc.is_empty() || self.fabric_wait == mc || self.loaders.fabric.iter().any(|(k, _)| k == &mc) {
+            return;
+        }
+        self.fabric_wait = mc.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            if let Ok(version) = crate::loaders::fetch_fabric(&mc) {
+                let _ = tx.send(Msg::Fabric(mc, version));
+            } else {
+                let _ = tx.send(Msg::Fabric(mc, String::new()));
+            }
+        });
     }
 
     fn save_settings(&self) {
@@ -318,8 +383,20 @@ impl Desktop {
         } else {
             self.notice = format!("Starting {id}…");
         }
+        let profile = if self.loader != "vanilla" {
+            match crate::loaders::installed_profile(&self.app, &id, &self.loader) {
+                Some(profile) => profile,
+                None => {
+                    self.notice = format!("Install {} on the Version tab first", crate::state::loader_label(&self.loader));
+                    self.tab = Tab::Versions;
+                    return;
+                }
+            }
+        } else {
+            id.clone()
+        };
         std::thread::spawn(move || {
-            let msg = match crate::play::launch_join(&app, &id, join.as_deref()) {
+            let msg = match crate::play::launch_join(&app, &profile, join.as_deref()) {
                 Ok(_) => {
                     if let Some(addr) = join.as_deref() {
                         format!("{id} is joining {addr}")
@@ -576,7 +653,8 @@ impl eframe::App for Desktop {
         self.frames += 1;
         let paper_ready = self.papers.contains_key(self.paper_for(&self.selected).title);
         let versions_ready = !self.versions.is_empty() || self.frames > 40;
-        if self.shot.is_some() && !self.shot_requested && self.frames > 6 && (paper_ready || self.frames > 90) && versions_ready {
+        let loaders_ready = self.loaders.ready && self.loaders.fabric.iter().any(|(k, v)| k == &self.selected && !v.is_empty());
+        if self.shot.is_some() && !self.shot_requested && self.frames > 8 && (paper_ready || self.frames > 90) && versions_ready && (loaders_ready || self.frames > 80) {
             self.shot_requested = true;
             ctx.send_viewport_cmd(ViewportCommand::Screenshot(Default::default()));
         }
@@ -607,6 +685,11 @@ impl Desktop {
             toggle_max(ui.ctx());
         }
 
+        if self.tab == Tab::Versions {
+            self.paint_version_page(ui, full);
+            self.paint_exit(ui, full);
+            return;
+        }
         let content = egui::Rect::from_min_max(
             egui::pos2(ux(full, 26.0), uy(full, 108.0)),
             egui::pos2(ux(full, 1168.0), uy(full, 608.0)),
@@ -618,7 +701,7 @@ impl Desktop {
             child.set_clip_rect(content);
             match self.tab {
                 Tab::Home => {}
-                Tab::Versions => self.page_versions(&mut child),
+                Tab::Versions => {}
                 Tab::Mods => self.page_mods(&mut child),
                 Tab::Settings => self.page_settings(&mut child),
             }
@@ -770,7 +853,7 @@ impl Desktop {
         let mut widths = Vec::new();
         let mut total = 8.0;
         for tab in tabs {
-            let galley = ui.painter().layout_no_wrap(tab.label().to_string(), lexend(15.0), TEXT);
+            let galley = ui.painter().layout_no_wrap(tab.label().to_string(), tab_font(15.0), TEXT);
             let w = 18.0 + 8.0 + galley.size().x + 16.0;
             widths.push(w);
             total += w + 4.0;
@@ -788,13 +871,8 @@ impl Desktop {
             }
             let color = if on { TEXT } else { MUTED };
             let icon_at = egui::pos2(item.left() + 16.0, item.center().y);
-            match tab {
-                Tab::Home => paint_house(ui.painter(), icon_at, color),
-                Tab::Versions => paint_layers(ui.painter(), icon_at, color),
-                Tab::Mods => paint_cube(ui.painter(), icon_at, color),
-                Tab::Settings => paint_gear(ui.painter(), icon_at, color),
-            }
-            ui.painter().text(egui::pos2(item.left() + 30.0, item.center().y), egui::Align2::LEFT_CENTER, tab.label(), lexend(15.0), color);
+            paint_material(ui.painter(), icon_at, 16.0, tab_icon(tab), color);
+            ui.painter().text(egui::pos2(item.left() + 30.0, item.center().y), egui::Align2::LEFT_CENTER, tab.label(), tab_font(15.0), color);
             if hit.clicked() {
                 self.tab = tab;
             }
@@ -941,105 +1019,273 @@ impl Desktop {
         }
     }
 
-    fn page_versions(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap().shrink(8.0);
-        let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
+    fn paint_exit(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let exit = drect(full, 1224.0, 28.0, 36.0, 36.0);
+        let hit = ui.interact(exit, egui::Id::new("exit-version"), Sense::click());
+        paint_exit_icon(ui.painter(), exit.center(), if hit.hovered() { V_GOLD } else { V_TEXT });
+        if hit.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if hit.clicked() {
+            self.quit(ui.ctx());
+        }
+        hit.on_hover_text("Exit");
+    }
+
+    fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let tabs = [
+            (Tab::Home, 26.0, 121.0),
+            (Tab::Versions, 160.0, 141.0),
+            (Tab::Mods, 314.0, 109.0),
+            (Tab::Settings, 436.0, 147.0),
+        ];
+        for (tab, x, w) in tabs {
+            let rect = drect(full, x, 26.0, w, 54.0);
+            if pill_tab(ui, rect, tab, self.tab == tab) {
+                self.tab = tab;
+            }
+        }
+        self.paint_version_list(ui, full);
+        self.paint_loader_panel(ui, full);
+    }
+
+    fn paint_version_list(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let panel = drect(full, 26.0, 106.0, 719.0, 587.0);
+        panel_card(ui.painter(), panel);
+        let release = drect(full, 46.0, 120.0, 120.0, 44.0);
+        let snapshot = drect(full, 178.0, 120.0, 134.0, 44.0);
+        if segment_button(ui, release, "RELEASE", self.release_view, "channel-release") {
+            self.release_view = true;
+        }
+        if segment_button(ui, snapshot, "SNAPSHOT", !self.release_view, "channel-snapshot") {
+            self.release_view = false;
+            if !self.snapshots {
+                self.snapshots = true;
+                self.save_settings();
+                spawn_versions(self.app.clone(), self.tx.clone());
+            }
+        }
+        let q = self.query.to_lowercase();
+        let rows: Vec<Ver> = self
+            .versions
+            .iter()
+            .filter(|v| if self.release_view { v.channel == "release" } else { v.channel == "snapshot" || v.channel == "preview" })
+            .filter(|v| q.is_empty() || v.id.to_lowercase().contains(&q))
+            .cloned()
+            .collect();
+        let count = format!("{} {}", rows.len(), if self.release_view { "RELEASES" } else { "SNAPSHOTS" });
+        paint_tracked(ui.painter(), egui::pos2(drect(full, 720.0, 142.0, 1.0, 1.0).left(), uy(full, 142.0)), egui::Align2::RIGHT_CENTER, &count, sub_font(us(full, 12.0)), V_MUTED, us(full, 1.1));
+
+        let list = drect(full, 28.0, 174.0, 715.0, 460.0);
+        let row_h = uy(full, 234.0) - uy(full, 174.0);
+        let painter = ui.painter().clone();
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
+        child.set_clip_rect(list);
         let ui = &mut child;
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Version").size(28.0).color(TEXT));
-                ui.label(RichText::new(&self.versions_note).size(14.0).color(MUTED));
+        ui.set_min_size(list.size());
+        if rows.is_empty() {
+            ui.painter().text(list.center(), egui::Align2::CENTER_CENTER, if self.versions.is_empty() { "Loading versions…" } else { "No versions in this channel" }, body_font(us(full, 15.0)), V_MUTED);
+            let _ = ui.allocate_rect(list, Sense::hover());
+        } else {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+                ui.set_width(list.width());
+                for v in &rows {
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), row_h), Sense::click());
+                    let on = self.selected == v.id;
+                    if on {
+                        ui.painter().rect_filled(rect, 0.0, V_SEL);
+                        let bar = egui::Rect::from_min_size(rect.min, egui::vec2(us(full, 4.0), rect.height()));
+                        ui.painter().rect_filled(bar, 0.0, V_GOLD);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, 0.0, egui::Color32::from_white_alpha(10));
+                    }
+                    let line = egui::Rect::from_min_max(egui::pos2(rect.left() + 12.0, rect.bottom() - 1.0), egui::pos2(rect.right() - 8.0, rect.bottom()));
+                    ui.painter().rect_filled(line, 0.0, V_LINE);
+                    let id_at = egui::pos2(rect.left() + us(full, 24.0), rect.center().y);
+                    ui.painter().text(id_at, egui::Align2::LEFT_CENTER, &v.id, title_font(us(full, 20.0)), V_TEXT);
+                    let name_x = rect.left() + us(full, 168.0);
+                    ui.painter().text(egui::pos2(name_x, rect.center().y), egui::Align2::LEFT_CENTER, self.paper_for(&v.id).title, body_font(us(full, 16.0)), V_TEXT);
+                    let date = crate::loaders::dot_date(&v.released);
+                    let date_font = sub_font(us(full, 14.0));
+                    let date_w = ui.painter().layout_no_wrap(date.clone(), date_font.clone(), V_MUTED).size().x;
+                    let date_at = egui::pos2(rect.right() - us(full, 18.0) - date_w, rect.center().y);
+                    ui.painter().text(date_at, egui::Align2::LEFT_CENTER, &date, date_font, V_MUTED);
+                    paint_material(ui.painter(), date_at - egui::vec2(us(full, 16.0), 0.0), us(full, 15.0), I_CLOCK, V_GOLD);
+                    let mut cursor = date_at.x - us(full, 34.0);
+                    if v.installed {
+                        let dot = egui::pos2(cursor, rect.center().y);
+                        ui.painter().circle_filled(dot, us(full, 4.5), V_GREEN);
+                        cursor -= us(full, 16.0);
+                    }
+                    let latest = v.id == self.version_latest || (self.version_latest.is_empty() && rows.first().map(|r| r.id.as_str()) == Some(v.id.as_str()) && v.channel == "release");
+                    if latest && self.release_view {
+                        let badge = egui::Rect::from_min_size(egui::pos2(cursor - us(full, 72.0), rect.center().y - us(full, 11.0)), egui::vec2(us(full, 64.0), us(full, 22.0)));
+                        ui.painter().rect_filled(badge, us(full, 6.0), egui::Color32::from_rgb(58, 67, 78));
+                        ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, "LATEST", sub_font(us(full, 11.0)), V_GOLD);
+                    }
+                    if resp.clicked() {
+                        self.selected = v.id.clone();
+                        self.save_settings();
+                        self.ensure_fabric();
+                    }
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                }
             });
-        });
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            field(ui, &mut self.query, 280.0, "Search versions");
-            ui.add_space(8.0);
-            let _ = button(ui, "Releases", 100.0, 44.0, true);
-            if button(ui, "Snapshots", 110.0, 44.0, self.snapshots) {
-                self.snapshots = !self.snapshots;
-                self.save_settings();
-                spawn_versions(self.app.clone(), self.tx.clone());
+        }
+
+        let foot = drect(full, 28.0, 636.0, 715.0, 55.0);
+        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(panel.left() + 1.0, foot.top()), egui::pos2(panel.right() - 1.0, foot.top() + 1.0)), 0.0, V_BORDER);
+        paint_tracked(&painter, egui::pos2(foot.left() + us(full, 16.0), foot.center().y), egui::Align2::LEFT_CENTER, "SELECTED", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.2));
+        painter.text(egui::pos2(foot.left() + us(full, 108.0), foot.center().y), egui::Align2::LEFT_CENTER, &self.selected, title_font(us(full, 16.0)), V_GOLD);
+        let drop = self.paper_for(&self.selected).title.to_uppercase();
+        paint_tracked(&painter, egui::pos2(foot.right() - us(full, 16.0), foot.center().y), egui::Align2::RIGHT_CENTER, &drop, sub_font(us(full, 12.0)), V_MUTED, us(full, 1.0));
+    }
+
+    fn paint_loader_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let panel = drect(full, 766.0, 106.0, 487.0, 587.0);
+        panel_card(ui.painter(), panel);
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), uy(full, 136.0)), egui::Align2::LEFT_CENTER, "LOADER", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.3));
+        let for_mc = format!("FOR MC {}", self.selected);
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 1230.0), uy(full, 136.0)), egui::Align2::RIGHT_CENTER, &for_mc, sub_font(us(full, 13.0)), V_GOLD, us(full, 0.8));
+
+        let mc = self.selected.clone();
+        let rows = crate::loaders::rows_for(&mc, &self.loaders);
+        let mut clicked: Option<String> = None;
+        for (i, row) in rows.iter().enumerate() {
+            let y = 168.0 + i as f32 * 78.0;
+            let rect = drect(full, 768.0, y, 483.0, 78.0);
+            let on = self.loader == row.id;
+            let hit = ui.interact(rect, egui::Id::new("loader-row").with(row.id), Sense::click());
+            if on {
+                ui.painter().rect_filled(rect, 0.0, V_SEL);
+                let bar = egui::Rect::from_min_size(rect.min, egui::vec2(us(full, 4.0), rect.height()));
+                ui.painter().rect_filled(bar, 0.0, V_BLUE);
+            } else if hit.hovered() && self.shot.is_none() {
+                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_white_alpha(8));
             }
-            if button(ui, "Previews", 104.0, 44.0, self.previews) {
-                self.previews = !self.previews;
-                self.save_settings();
-                spawn_versions(self.app.clone(), self.tx.clone());
+            if i + 1 < rows.len() {
+                let line = egui::Rect::from_min_max(egui::pos2(rect.left() + us(full, 16.0), rect.bottom() - 1.0), egui::pos2(rect.right() - us(full, 12.0), rect.bottom()));
+                ui.painter().rect_filled(line, 0.0, V_LINE);
             }
-        });
-        ui.add_space(12.0);
-        let list_w = (ui.available_width() - 356.0).max(360.0);
-        let body_h = ui.available_height();
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(list_w);
-                ui.set_min_height(body_h);
-                let q = self.query.to_lowercase();
-                let rows: Vec<Ver> = self.versions.iter().filter(|v| q.is_empty() || v.id.to_lowercase().contains(&q)).cloned().collect();
-                egui::ScrollArea::vertical()
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                    .auto_shrink([false, false])
-                    .max_height(body_h)
-                    .show(ui, |ui| {
-                        for v in rows {
-                            let on = self.selected == v.id;
-                            let paper = wallpapers::for_version(&v.id);
-                            let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), Sense::click());
-                            ui.painter().rect_filled(rect, 8.0, if on { SELECTED } else { SURFACE });
-                            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { ACCENT } else { BORDER }), egui::StrokeKind::Inside);
-                            if let Some(tex) = self.papers.get(paper.title) {
-                                let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 10.0), egui::vec2(44.0, 44.0));
-                                ui.painter().image(tex.id(), thumb, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                            }
-                            ui.painter().text(rect.min + egui::vec2(64.0, 14.0), egui::Align2::LEFT_TOP, &v.id, egui::FontId::proportional(15.0), TEXT);
-                            ui.painter().text(rect.min + egui::vec2(64.0, 34.0), egui::Align2::LEFT_TOP, format!("{} · {}", paper.title, v.channel), egui::FontId::proportional(12.0), MUTED);
-                            let status = if on { "Selected" } else if v.installed { "Installed" } else { "Not installed" };
-                            let accent = on || v.installed;
-                            let chip_w = 108.0;
-                            let chip_r = egui::Rect::from_min_size(egui::pos2(rect.right() - chip_w - 12.0, rect.center().y - 12.0), egui::vec2(chip_w, 24.0));
-                            ui.painter().rect_stroke(chip_r, 12.0, egui::Stroke::new(1.0, if accent { ACCENT } else { BORDER_BTN }), egui::StrokeKind::Inside);
-                            ui.painter().text(chip_r.center(), egui::Align2::CENTER_CENTER, status, egui::FontId::proportional(12.0), if accent { ACCENT } else { MUTED });
-                            if resp.clicked() {
-                                self.selected = v.id.clone();
-                                self.save_settings();
-                            }
-                            if resp.has_focus() {
-                                ui.painter().rect_stroke(rect.expand(2.0), 8.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside);
-                            }
-                            ui.add_space(6.0);
-                        }
-                    });
-            });
-            ui.add_space(16.0);
-            ui.vertical(|ui| {
-                ui.set_width(340.0);
-                card(ui, |ui| {
-                    let paper = wallpapers::for_version(&self.selected);
-                    if let Some(tex) = self.papers.get(paper.title) {
-                        ui.add(egui::Image::from_texture((tex.id(), tex.size_vec2())).fit_to_exact_size(egui::vec2(300.0, 72.0)));
-                    }
-                    ui.add_space(8.0);
-                    ui.label(RichText::new(&self.selected).size(22.0).color(TEXT));
-                    ui.label(RichText::new(paper.title).size(14.0).color(MUTED));
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("INSTALL OPTIONS").size(12.0).color(ACCENT));
-                    ui.add_space(4.0);
-                    for p in &mut self.patches {
-                        check(ui, &mut p.enabled, &p.title);
-                    }
-                    ui.add_space(8.0);
-                    if button(ui, &format!("Install {}", self.selected), 300.0, 36.0, true) {
-                        self.start_install();
-                    }
-                    if let Some((progress, line)) = self.job_line() {
-                        ui.add_space(8.0);
-                        ui.add(egui::ProgressBar::new(progress.clamp(0.0, 1.0)).text(line));
-                    }
-                });
-            });
+            let well = egui::Rect::from_center_size(egui::pos2(ux(full, 814.0), rect.center().y), egui::vec2(us(full, 46.0), us(full, 46.0)));
+            ui.painter().rect_filled(well, us(full, 8.0), loader_well(row.id));
+            if let Some(tex) = self.loader_icon_id(row.id) {
+                let inner = well.shrink(us(full, 5.0));
+                ui.painter().image(tex.id(), inner, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            }
+            ui.painter().text(egui::pos2(ux(full, 852.0), rect.center().y), egui::Align2::LEFT_CENTER, row.name, title_font(us(full, 18.0)), V_TEXT);
+            let detail = loader_detail(row, &mc, self.loaders.ready);
+            let detail_color = if row.kind == crate::loaders::Badge::Preview { V_GOLD } else { V_MUTED };
+            ui.painter().text(egui::pos2(ux(full, 1004.0), rect.center().y), egui::Align2::LEFT_CENTER, &detail, body_font(us(full, 15.0)), detail_color);
+            let badge = loader_badge_rect(full, rect);
+            paint_badge(ui.painter(), badge, row.badge, row.kind);
+            if hit.clicked() {
+                clicked = Some(row.id.to_string());
+            }
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+        }
+        if let Some(id) = clicked {
+            self.loader = id;
+            self.save_settings();
+        }
+
+        let selected = rows.iter().find(|r| r.id == self.loader).cloned();
+        let foot_y = uy(full, 578.0);
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), foot_y), egui::Align2::LEFT_CENTER, "SELECTED LOADER", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.1));
+        if let Some(row) = &selected {
+            let right = if row.version.is_empty() {
+                row.name.to_uppercase()
+            } else {
+                format!("{} {}", row.name.to_uppercase(), row.version)
+            };
+            paint_tracked(ui.painter(), egui::pos2(ux(full, 1230.0), foot_y), egui::Align2::RIGHT_CENTER, &right, sub_font(us(full, 13.0)), V_GOLD, us(full, 0.7));
+        }
+        let install = drect(full, 786.0, 612.0, 448.0, 58.0);
+        let label = self.install_label(selected.as_ref());
+        let enabled = label == "INSTALL";
+        if install_button(ui, install, &label, enabled) && enabled {
+            self.on_install();
+        }
+    }
+
+    fn loader_icon_id(&self, id: &str) -> Option<&egui::TextureHandle> {
+        match id {
+            "forge" => self.icon_forge.as_ref(),
+            "fabric" => self.icon_fabric.as_ref(),
+            "neoforge" => self.icon_neoforge.as_ref(),
+            "optifine" => self.icon_optifine.as_ref(),
+            _ => self.grass.as_ref(),
+        }
+    }
+
+    fn install_label(&self, row: Option<&crate::loaders::LoaderRow>) -> String {
+        let Some(row) = row else { return "INSTALL".into() };
+        if row.id == "optifine" || (row.kind == crate::loaders::Badge::Preview && row.version.is_empty() && self.loaders.ready) {
+            return "UNAVAILABLE".into();
+        }
+        if row.id == "vanilla" {
+            return if self.app.is_installed(&self.selected) { "INSTALLED".into() } else { "INSTALL".into() };
+        }
+        if crate::loaders::is_profile_installed(&self.app, &self.selected, row.id) {
+            "INSTALLED".into()
+        } else {
+            "INSTALL".into()
+        }
+    }
+
+    fn on_install(&mut self) {
+        let mc = self.selected.clone();
+        let loader = self.loader.clone();
+        if mc.is_empty() {
+            self.notice = "Select a version".into();
+            return;
+        }
+        if loader == "vanilla" {
+            if self.app.is_installed(&mc) {
+                self.notice = format!("{mc} is already installed");
+            } else {
+                self.start_install();
+            }
+            return;
+        }
+        if loader == "optifine" {
+            self.notice = format!("OptiFine has no build for {mc}");
+            return;
+        }
+        let version = crate::loaders::rows_for(&mc, &self.loaders).into_iter().find(|r| r.id == loader).map(|r| r.version).unwrap_or_default();
+        if version.is_empty() {
+            self.notice = format!("No {loader} build for {mc}");
+            return;
+        }
+        if !self.app.is_installed(&mc) {
+            self.loader_after = true;
+            self.notice = format!("Installing {mc}, then {loader}");
+            self.start_install();
+            return;
+        }
+        self.spawn_loader_install();
+    }
+
+    fn spawn_loader_install(&mut self) {
+        let mc = self.selected.clone();
+        let loader = self.loader.clone();
+        let version = crate::loaders::rows_for(&mc, &self.loaders).into_iter().find(|r| r.id == loader).map(|r| r.version).unwrap_or_default();
+        let app = self.app.clone();
+        let tx = self.tx.clone();
+        self.notice = format!("Installing {loader} {version} for {mc}…");
+        std::thread::spawn(move || {
+            let msg = match crate::loaders::install(&app, &mc, &loader, &version) {
+                Ok(id) => format!("{loader} is installed ({id})"),
+                Err(e) => e,
+            };
+            let _ = tx.send(Msg::Notice(msg));
         });
     }
+
 
     fn page_mods(&mut self, ui: &mut egui::Ui) {
         let outer = ui.available_rect_before_wrap().shrink(8.0);
@@ -1657,18 +1903,45 @@ fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
     }
 }
 
+fn title_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Title".into()))
+}
+
+fn tab_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Tab".into()))
+}
+
+fn body_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Body".into()))
+}
+
+fn sub_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Sub".into()))
+}
+
+fn icon_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Icons".into()))
+}
+
 fn lexend(size: f32) -> egui::FontId {
-    egui::FontId::new(size, egui::FontFamily::Name("Lexend".into()))
+    title_font(size)
 }
 
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("Lexend".into(), egui::FontData::from_static(include_bytes!("../assets/Lexend-700.ttf")).into());
+    fonts.font_data.insert("Outfit".into(), egui::FontData::from_static(include_bytes!("../assets/Outfit-700.ttf")).into());
+    fonts.font_data.insert("Manrope".into(), egui::FontData::from_static(include_bytes!("../assets/Manrope-600.ttf")).into());
+    fonts.font_data.insert("SourceSans".into(), egui::FontData::from_static(include_bytes!("../assets/SourceSans3-600.ttf")).into());
+    fonts.font_data.insert("Roboto".into(), egui::FontData::from_static(include_bytes!("../assets/Roboto-400.ttf")).into());
+    fonts.font_data.insert("Material".into(), egui::FontData::from_static(include_bytes!("../assets/MaterialSymbols.ttf")).into());
     fonts.font_data.insert("Nunito".into(), egui::FontData::from_static(include_bytes!("../assets/NunitoSans-600.ttf")).into());
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Nunito".into());
-    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Nunito".into());
-    fonts.families.insert(egui::FontFamily::Name("Lexend".into()), vec!["Lexend".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Nunito".into()), vec!["Nunito".into()]);
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "SourceSans".into());
+    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Roboto".into());
+    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Outfit".into(), "Nunito".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Manrope".into(), "Nunito".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["SourceSans".into(), "Nunito".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Roboto".into(), "Nunito".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Icons".into()), vec!["Material".into()]);
     ctx.set_fonts(fonts);
 }
 
@@ -1775,9 +2048,187 @@ fn format_bytes(n: u64) -> String {
     if n < 1024 { format!("{n} B") } else if n < 1024 * 1024 { format!("{} KB", n / 1024) } else { format!("{:.1} MB", n as f64 / 1_048_576.0) }
 }
 
+const V_PANEL: egui::Color32 = egui::Color32::from_rgb(13, 22, 39);
+const V_BORDER: egui::Color32 = egui::Color32::from_rgb(42, 58, 88);
+const V_SEL: egui::Color32 = egui::Color32::from_rgb(26, 43, 73);
+const V_LINE: egui::Color32 = egui::Color32::from_rgb(30, 42, 64);
+const V_GOLD: egui::Color32 = egui::Color32::from_rgb(232, 195, 104);
+const V_GOLD_EDGE: egui::Color32 = egui::Color32::from_rgb(168, 140, 72);
+const V_MUTED: egui::Color32 = egui::Color32::from_rgb(126, 146, 174);
+const V_TEXT: egui::Color32 = egui::Color32::from_rgb(242, 246, 252);
+const V_GREEN: egui::Color32 = egui::Color32::from_rgb(93, 192, 74);
+const V_GREEN_INK: egui::Color32 = egui::Color32::from_rgb(16, 36, 18);
+const V_TAB: egui::Color32 = egui::Color32::from_rgb(15, 25, 44);
+const V_TAB_ON: egui::Color32 = egui::Color32::from_rgb(27, 43, 72);
+const V_TAB_EDGE: egui::Color32 = egui::Color32::from_rgb(38, 52, 79);
+const V_TAB_ON_EDGE: egui::Color32 = egui::Color32::from_rgb(58, 77, 112);
+const V_RELEASE: egui::Color32 = egui::Color32::from_rgb(44, 46, 48);
+const V_BLUE: egui::Color32 = egui::Color32::from_rgb(74, 131, 234);
+const V_PREVIEW: egui::Color32 = egui::Color32::from_rgb(110, 78, 40);
+const V_PREVIEW_INK: egui::Color32 = egui::Color32::from_rgb(242, 220, 180);
+
+const I_HOME: char = '\u{E88A}';
+const I_LAYERS: char = '\u{E53B}';
+const I_CUBE: char = '\u{F720}';
+const I_FLARE: char = '\u{E3E4}';
+const I_CLOCK: char = '\u{E8B5}';
+const I_DOWN: char = '\u{E5DB}';
+
+fn drect(full: egui::Rect, x: f32, y: f32, w: f32, h: f32) -> egui::Rect {
+    egui::Rect::from_min_max(egui::pos2(ux(full, x), uy(full, y)), egui::pos2(ux(full, x + w), uy(full, y + h)))
+}
+
+fn tab_icon(tab: Tab) -> char {
+    match tab {
+        Tab::Home => I_HOME,
+        Tab::Versions => I_LAYERS,
+        Tab::Mods => I_CUBE,
+        Tab::Settings => I_FLARE,
+    }
+}
+
+fn paint_material(painter: &egui::Painter, center: egui::Pos2, size: f32, icon: char, color: egui::Color32) {
+    painter.text(center, egui::Align2::CENTER_CENTER, icon.to_string(), icon_font(size), color);
+}
+
+fn panel_card(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 12.0, V_PANEL);
+    painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.0, V_BORDER), egui::StrokeKind::Inside);
+}
+
+fn pill_tab(ui: &mut egui::Ui, rect: egui::Rect, tab: Tab, on: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("vtab").with(tab.label()), Sense::click());
+    let fill = if on {
+        V_TAB_ON
+    } else if hit.hovered() {
+        egui::Color32::from_rgb(22, 34, 56)
+    } else {
+        V_TAB
+    };
+    let edge = if on { V_TAB_ON_EDGE } else { V_TAB_EDGE };
+    ui.painter().rect_filled(rect, 10.0, fill);
+    ui.painter().rect_stroke(rect, 10.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    let color = if on { V_TEXT } else { V_MUTED };
+    let icon_at = egui::pos2(rect.left() + rect.height() * 0.42, rect.center().y);
+    paint_material(ui.painter(), icon_at, rect.height() * 0.36, tab_icon(tab), color);
+    ui.painter().text(egui::pos2(icon_at.x + rect.height() * 0.34, rect.center().y), egui::Align2::LEFT_CENTER, tab.label(), tab_font(rect.height() * 0.30), color);
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+fn segment_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, on: bool, id: &str) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
+    if on {
+        ui.painter().rect_filled(rect, 8.0, V_RELEASE);
+        ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.5, V_GOLD_EDGE), egui::StrokeKind::Inside);
+        paint_tracked(ui.painter(), rect.center(), egui::Align2::CENTER_CENTER, label, sub_font(rect.height() * 0.30), V_GOLD, 1.1);
+    } else {
+        ui.painter().rect_filled(rect, 8.0, V_PANEL);
+        ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, V_BORDER), egui::StrokeKind::Inside);
+        paint_tracked(ui.painter(), rect.center(), egui::Align2::CENTER_CENTER, label, sub_font(rect.height() * 0.30), V_MUTED, 1.1);
+    }
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+fn paint_tracked(painter: &egui::Painter, pos: egui::Pos2, align: egui::Align2, text: &str, font: egui::FontId, color: egui::Color32, tracking: f32) {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return;
+    }
+    let mut widths = Vec::new();
+    let mut total = 0.0;
+    for ch in &chars {
+        let w = painter.layout_no_wrap(ch.to_string(), font.clone(), color).size().x;
+        widths.push(w);
+        total += w;
+    }
+    if chars.len() > 1 {
+        total += tracking * (chars.len() - 1) as f32;
+    }
+    let mut x = if align.x() == egui::Align::RIGHT {
+        pos.x - total
+    } else if align.x() == egui::Align::Center {
+        pos.x - total * 0.5
+    } else {
+        pos.x
+    };
+    for (ch, w) in chars.iter().zip(widths) {
+        painter.text(egui::pos2(x, pos.y), egui::Align2::LEFT_CENTER, ch.to_string(), font.clone(), color);
+        x += w + tracking;
+    }
+}
+
+fn loader_well(id: &str) -> egui::Color32 {
+    match id {
+        "forge" => egui::Color32::from_rgb(8, 8, 8),
+        "neoforge" => egui::Color32::from_rgb(186, 196, 204),
+        "optifine" => egui::Color32::from_rgb(92, 28, 32),
+        "fabric" => egui::Color32::from_rgb(28, 32, 42),
+        _ => egui::Color32::from_rgb(18, 26, 40),
+    }
+}
+
+fn loader_detail(row: &crate::loaders::LoaderRow, mc: &str, ready: bool) -> String {
+    if row.id == "optifine" {
+        return crate::loaders::missing_line(mc);
+    }
+    if row.version.is_empty() {
+        if ready {
+            crate::loaders::missing_line(mc)
+        } else {
+            "…".into()
+        }
+    } else {
+        row.detail.clone()
+    }
+}
+
+fn loader_badge_rect(full: egui::Rect, row: egui::Rect) -> egui::Rect {
+    let w = us(full, 78.0);
+    let h = us(full, 22.0);
+    egui::Rect::from_min_size(egui::pos2(row.right() - w - us(full, 16.0), row.center().y - h * 0.5), egui::vec2(w, h))
+}
+
+fn paint_badge(painter: &egui::Painter, rect: egui::Rect, label: &str, kind: crate::loaders::Badge) {
+    let (fill, ink) = match kind {
+        crate::loaders::Badge::BuiltIn | crate::loaders::Badge::Ready => (V_GREEN, V_GREEN_INK),
+        crate::loaders::Badge::Preview => (V_PREVIEW, V_PREVIEW_INK),
+    };
+    painter.rect_filled(rect, rect.height() * 0.35, fill);
+    painter.text(rect.center(), egui::Align2::CENTER_CENTER, label, sub_font(rect.height() * 0.52), ink);
+}
+
+fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("loader-install"), Sense::click());
+    let top = if enabled { egui::Color32::from_rgb(98, 154, 236) } else { egui::Color32::from_rgb(48, 62, 84) };
+    let bot = if enabled { egui::Color32::from_rgb(46, 91, 193) } else { egui::Color32::from_rgb(36, 48, 66) };
+    ui.painter().rect_filled(rect, 10.0, bot);
+    let cap = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.center().y + 6.0));
+    ui.painter().rect_filled(cap, 10.0, top);
+    let ink = if enabled { egui::Color32::WHITE } else { V_MUTED };
+    if enabled {
+        paint_material(ui.painter(), egui::pos2(rect.center().x - us_rect(rect, 54.0), rect.center().y), rect.height() * 0.42, I_DOWN, V_GOLD);
+    }
+    ui.painter().text(egui::pos2(rect.center().x + if enabled { 16.0 } else { 0.0 }, rect.center().y), egui::Align2::CENTER_CENTER, label, title_font(rect.height() * 0.34), ink);
+    if hit.hovered() && enabled {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked() && enabled
+}
+
+fn us_rect(rect: egui::Rect, design: f32) -> f32 {
+    design * rect.height() / 58.0
+}
+
 fn spawn_versions(app: Arc<App>, tx: Sender<Msg>) {
     std::thread::spawn(move || match crate::mojang::version_list(&app) {
         Ok(v) => {
+            let latest = v.get("latest").and_then(|l| l.get("release")).and_then(|s| s.as_str()).unwrap_or("").to_string();
             let mut out = Vec::new();
             if let Some(arr) = v.get("versions").and_then(|x| x.as_array()) {
                 for item in arr {
@@ -1785,12 +2236,20 @@ fn spawn_versions(app: Arc<App>, tx: Sender<Msg>) {
                         id: item.get("id").and_then(|x| x.as_str()).unwrap_or("").into(),
                         channel: item.get("channel").and_then(|x| x.as_str()).unwrap_or("").into(),
                         installed: item.get("installed").and_then(|x| x.as_bool()).unwrap_or(false),
+                        released: item.get("released").and_then(|x| x.as_str()).unwrap_or("").into(),
                     });
                 }
             }
-            let _ = tx.send(Msg::Versions(out));
+            let _ = tx.send(Msg::Versions { rows: out, latest });
         }
         Err(e) => { let _ = tx.send(Msg::VersionsErr(e)); }
+    });
+}
+
+fn spawn_loaders(tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let cat = crate::loaders::fetch_shared().unwrap_or_else(|e| crate::loaders::Catalog { note: e, ready: true, ..Default::default() });
+        let _ = tx.send(Msg::Loaders(cat));
     });
 }
 

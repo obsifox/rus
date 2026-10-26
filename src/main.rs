@@ -9,6 +9,7 @@ mod dialog;
 mod horizon;
 mod install;
 mod java;
+mod loaders;
 mod mods;
 mod mojang;
 mod net;
