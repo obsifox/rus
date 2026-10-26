@@ -1,8 +1,8 @@
-//! Official Minecraft collection wallpapers from minecraft.net.
+//! Official Minecraft collection wallpapers.
 //!
-//! The page's 414px pictures are only previews. Each drop's Download button
-//! is a zip. Rus fetches that pack and keeps the desktop image (1920x1080
-//! when the pack has one). The art stays in the data folder, not in the binary.
+//! Each drop's desktop image is stored inside Rus as a small 960×540 JPEG.
+//! The window is that same size, so the art fills it without stretching and
+//! without a download.
 
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -159,6 +159,36 @@ fn version_is(id: &str, prefix: &str) -> bool {
         || id.starts_with(&format!("{prefix}-"))
 }
 
+pub fn embedded(title: &str) -> Option<&'static [u8]> {
+    Some(match title {
+        "Java Edition" => include_bytes!("../assets/wallpapers/java-edition.jpg"),
+        "Wilderness Bound" => include_bytes!("../assets/wallpapers/wilderness-bound.jpg"),
+        "Chaos Cubed" => include_bytes!("../assets/wallpapers/chaos-cubed.jpg"),
+        "Tiny Takeover" => include_bytes!("../assets/wallpapers/tiny-takeover.jpg"),
+        "Mounts of Mayhem" => include_bytes!("../assets/wallpapers/mounts-of-mayhem.jpg"),
+        "The Copper Age" => include_bytes!("../assets/wallpapers/the-copper-age.jpg"),
+        "Chase the Skies" => include_bytes!("../assets/wallpapers/chase-the-skies.jpg"),
+        "Spring to Life" => include_bytes!("../assets/wallpapers/spring-to-life.jpg"),
+        "The Garden Awakens" => include_bytes!("../assets/wallpapers/the-garden-awakens.jpg"),
+        "Bundles of Bravery" => include_bytes!("../assets/wallpapers/bundles-of-bravery.jpg"),
+        "Tricky Trials" => include_bytes!("../assets/wallpapers/tricky-trials.jpg"),
+        "Trails & Tales" => include_bytes!("../assets/wallpapers/trails---tales.jpg"),
+        "Wild Update" => include_bytes!("../assets/wallpapers/wild-update.jpg"),
+        "Caves & Cliffs part II" => include_bytes!("../assets/wallpapers/caves---cliffs-part-ii.jpg"),
+        "Caves & Cliffs part I" => include_bytes!("../assets/wallpapers/caves---cliffs-part-i.jpg"),
+        "Nether Update" => include_bytes!("../assets/wallpapers/nether-update.jpg"),
+        "Buzzy Bees Update" => include_bytes!("../assets/wallpapers/buzzy-bees-update.jpg"),
+        "Village and Pillage" => include_bytes!("../assets/wallpapers/village-and-pillage.jpg"),
+        "Update Aquatic" => include_bytes!("../assets/wallpapers/update-aquatic.jpg"),
+        "World of Color" => include_bytes!("../assets/wallpapers/world-of-color.jpg"),
+        "Boat Trip" => include_bytes!("../assets/wallpapers/boat-trip.jpg"),
+        "Beach Cabin" => include_bytes!("../assets/wallpapers/beach-cabin.jpg"),
+        "Mining" => include_bytes!("../assets/wallpapers/mining.jpg"),
+        "Winter Celebration" => include_bytes!("../assets/wallpapers/winter-celebration.jpg"),
+        _ => return None,
+    })
+}
+
 pub fn slug(title: &str) -> String {
     title
         .chars()
@@ -303,6 +333,15 @@ fn desktop_score(name: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_collection_is_bundled() {
+        for paper in all() {
+            let bytes = embedded(paper.title).unwrap_or_else(|| panic!("missing {}", paper.title));
+            assert!(bytes.len() > 8_000, "{}", paper.title);
+            assert!(bytes.len() < 120_000, "{} is {} bytes", paper.title, bytes.len());
+        }
+    }
 
     #[test]
     fn desktop_pack_prefers_1920x1080() {

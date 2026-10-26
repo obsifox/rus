@@ -58,7 +58,9 @@ impl SkinPreview {
             ArmModel::Auto => detected_slim,
         };
         ui.vertical(|ui| {
-            let size = egui::vec2(220.0, 240.0);
+            ui.set_width(168.0);
+            ui.set_max_width(168.0);
+            let size = egui::vec2(168.0, 150.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
             let anim = self.auto_rotate || self.walk;
             if anim {
@@ -151,13 +153,13 @@ impl SkinPreview {
                 egui::Stroke::new(1.0, egui::Color32::from_rgb(0x3E, 0x6C, 0xA4)),
                 egui::StrokeKind::Inside,
             );
-            ui.add_space(6.0);
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if view_button(ui, "Front") { self.yaw = 0.0; self.pitch = 0.12; self.dirty = true; }
                 if view_button(ui, "Back") { self.yaw = std::f32::consts::PI; self.pitch = 0.12; self.dirty = true; }
                 if view_button(ui, "Side") { self.yaw = std::f32::consts::FRAC_PI_2; self.pitch = 0.12; self.dirty = true; }
             });
-            ui.add_space(4.0);
+            ui.add_space(2.0);
             toggle(ui, &mut self.show_cape, "Cape", &mut self.dirty);
             toggle(ui, &mut self.show_overlay, "Overlay layers", &mut self.dirty);
             toggle(ui, &mut self.auto_rotate, "Auto-rotate", &mut self.dirty);
@@ -181,11 +183,11 @@ impl SkinPreview {
 }
 
 fn view_button(ui: &mut egui::Ui, label: &str) -> bool {
-    ui.add(egui::Button::new(label).min_size(egui::vec2(64.0, 28.0))).clicked()
+    ui.add(egui::Button::new(label).min_size(egui::vec2(50.0, 24.0))).clicked()
 }
 
 fn model_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    let mut b = egui::Button::new(label).min_size(egui::vec2(64.0, 28.0));
+    let mut b = egui::Button::new(label).min_size(egui::vec2(50.0, 24.0));
     if on {
         b = b.fill(egui::Color32::from_rgb(0x3B, 0x82, 0xF6));
     }

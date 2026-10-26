@@ -12,6 +12,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+const WINDOW_W: f32 = 960.0;
+const WINDOW_H: f32 = 540.0;
+
 const BG: egui::Color32 = egui::Color32::from_rgb(0x08, 0x10, 0x1C);
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x10, 0x1A, 0x2C);
 const SURFACE2: egui::Color32 = egui::Color32::from_rgb(0x16, 0x24, 0x3A);
@@ -33,6 +36,11 @@ const ERR: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xA0, 0x98);
 enum Tab {
     Home,
     Versions,
+    Mods,
+    Settings,
+}
+
+enum Page {
     Mods,
     Settings,
 }
@@ -131,10 +139,11 @@ struct Desktop {
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
     let viewport = egui::ViewportBuilder::default()
-        .with_inner_size([960.0, 540.0])
-        .with_min_inner_size([800.0, 450.0])
+        .with_inner_size([WINDOW_W, WINDOW_H])
+        .with_min_inner_size([WINDOW_W, WINDOW_H])
+        .with_max_inner_size([WINDOW_W, WINDOW_H])
         .with_decorations(false)
-        .with_resizable(true)
+        .with_resizable(false)
         .with_title("Rus")
         .with_icon(icon_data());
     let options = eframe::NativeOptions { viewport, ..Default::default() };
@@ -218,7 +227,7 @@ impl Desktop {
         spawn_versions(app.clone(), tx.clone());
         spawn_mods(app.clone(), tx.clone());
         spawn_loaders(tx.clone());
-        spawn_papers(app.dir.clone(), tx);
+        me.load_papers(&cc.egui_ctx);
         if me.shot.is_some() && me.tab == Tab::Versions {
             me.loader = "forge".into();
             me.selected = "26.3".into();
@@ -648,8 +657,13 @@ impl eframe::App for Desktop {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG))
             .show(ctx, |ui| self.shell(ui));
-        window_edges(ctx);
         paint_frame(ctx);
+        let size = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()));
+        if let Some(size) = size {
+            if (size.x - WINDOW_W).abs() > 1.0 || (size.y - WINDOW_H).abs() > 1.0 {
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WINDOW_W, WINDOW_H)));
+            }
+        }
         self.frames += 1;
         let paper_ready = self.papers.contains_key(self.paper_for(&self.selected).title);
         let versions_ready = !self.versions.is_empty() || self.frames > 40;
@@ -674,39 +688,62 @@ impl eframe::App for Desktop {
 
 impl Desktop {
     fn shell(&mut self, ui: &mut egui::Ui) {
+        use_page_fonts(ui);
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        let drag = ui.interact(full, egui::Id::new("window-drag"), Sense::click_and_drag());
-        if drag.drag_started() {
+        // Drag only the empty strip above the tabs. A full-window drag was
+        // stealing clicks, so the pointer had to sit above the button.
+        let drag = egui::Rect::from_min_max(full.left_top(), egui::pos2(full.right(), uy(full, 18.0)));
+        let drag_hit = ui.interact(drag, egui::Id::new("window-drag"), Sense::drag());
+        if drag_hit.drag_started() {
             ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
         }
-        if drag.double_clicked() {
-            toggle_max(ui.ctx());
+        self.paint_shared_tabs(ui, full);
+        self.paint_exit(ui, full);
+        match self.tab {
+            Tab::Home => self.paint_chrome(ui, full),
+            Tab::Versions => self.paint_version_page(ui, full),
+            Tab::Mods => self.page_in_panel(ui, full, Page::Mods),
+            Tab::Settings => self.page_in_panel(ui, full, Page::Settings),
         }
+    }
 
-        if self.tab == Tab::Versions {
-            self.paint_version_page(ui, full);
-            self.paint_exit(ui, full);
-            return;
-        }
-        let content = egui::Rect::from_min_max(
-            egui::pos2(ux(full, 26.0), uy(full, 108.0)),
-            egui::pos2(ux(full, 1168.0), uy(full, 608.0)),
-        );
-        if self.tab != Tab::Home {
-            glass(ui.painter(), content, 14.0, glass_fill());
-            let inner = content.shrink(10.0);
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-            child.set_clip_rect(content);
-            match self.tab {
-                Tab::Home => {}
-                Tab::Versions => {}
-                Tab::Mods => self.page_mods(&mut child),
-                Tab::Settings => self.page_settings(&mut child),
+    fn load_papers(&mut self, ctx: &egui::Context) {
+        for paper in wallpapers::all() {
+            if let Some(bytes) = wallpapers::embedded(paper.title) {
+                if let Some(tex) = load_texture(ctx, paper.title, bytes) {
+                    self.papers.insert(paper.title.to_string(), tex);
+                }
             }
         }
-        self.paint_chrome(ui, full);
+    }
+
+    fn page_in_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect, page: Page) {
+        let panel = drect(full, 26.0, 96.0, 1228.0, 608.0);
+        panel_card(ui.painter(), panel);
+        let inner = panel.shrink(us(full, 14.0));
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+        child.set_clip_rect(inner);
+        match page {
+            Page::Mods => self.page_mods(&mut child),
+            Page::Settings => self.page_settings(&mut child),
+        }
+    }
+
+    fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let tabs = [
+            (Tab::Home, 26.0, 121.0),
+            (Tab::Versions, 160.0, 141.0),
+            (Tab::Mods, 314.0, 109.0),
+            (Tab::Settings, 436.0, 147.0),
+        ];
+        for (tab, x, w) in tabs {
+            let rect = drect(full, x, 26.0, w, 54.0);
+            if pill_tab(ui, rect, tab, self.tab == tab) {
+                self.tab = tab;
+            }
+        }
     }
 
     fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
@@ -720,8 +757,8 @@ impl Desktop {
             ui.painter().text(
                 full.center(),
                 egui::Align2::CENTER_CENTER,
-                "Fetching the collection wallpaper…",
-                egui::FontId::proportional(16.0),
+                "Wallpaper is missing from this build",
+                body_font(16.0),
                 MUTED,
             );
         }
@@ -746,14 +783,7 @@ impl Desktop {
     }
 
     fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        self.account_bar(ui, egui::pos2(ux(full, 26.0), uy(full, 26.0)), us(full, 63.0));
-        self.nav_bar(ui, egui::pos2(ux(full, 214.0), uy(full, 26.0)), us(full, 63.0));
-        let exit = egui::Rect::from_min_size(egui::pos2(ux(full, 1210.0), uy(full, 28.0)), egui::vec2(us(full, 52.0), us(full, 52.0)));
-        if icon_button(ui, exit, "exit", false, "Exit") {
-            self.quit(ui.ctx());
-        }
-        paint_exit_icon(ui.painter(), exit.center(), TEXT);
-
+        self.account_bar(ui, egui::pos2(ux(full, 604.0), uy(full, 26.0)), us(full, 54.0));
         let horizon_on = self.engine == "horizon";
         self.paint_recent_servers(ui, full);
 
@@ -921,7 +951,7 @@ impl Desktop {
             ui.painter().image(tex.id(), hero, cover_uv(tex.size_vec2(), hero), egui::Color32::WHITE);
         } else {
             ui.painter().rect_filled(hero, 0.0, SURFACE);
-            ui.painter().text(hero.center(), egui::Align2::CENTER_CENTER, "Fetching the collection wallpaper…", egui::FontId::proportional(16.0), MUTED);
+            ui.painter().text(hero.center(), egui::Align2::CENTER_CENTER, "Wallpaper is missing from this build", body_font(16.0), MUTED);
         }
         paint_fade(ui, hero);
         ui.painter().text(
@@ -1022,7 +1052,7 @@ impl Desktop {
     fn paint_exit(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let exit = drect(full, 1224.0, 28.0, 36.0, 36.0);
         let hit = ui.interact(exit, egui::Id::new("exit-version"), Sense::click());
-        paint_exit_icon(ui.painter(), exit.center(), if hit.hovered() { V_GOLD } else { V_TEXT });
+        paint_material(ui.painter(), exit.center(), us(full, 22.0), I_CLOSE, if hit.hovered() { V_GOLD } else { V_TEXT });
         if hit.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
@@ -1033,18 +1063,6 @@ impl Desktop {
     }
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let tabs = [
-            (Tab::Home, 26.0, 121.0),
-            (Tab::Versions, 160.0, 141.0),
-            (Tab::Mods, 314.0, 109.0),
-            (Tab::Settings, 436.0, 147.0),
-        ];
-        for (tab, x, w) in tabs {
-            let rect = drect(full, x, 26.0, w, 54.0);
-            if pill_tab(ui, rect, tab, self.tab == tab) {
-                self.tab = tab;
-            }
-        }
         self.paint_version_list(ui, full);
         self.paint_loader_panel(ui, full);
     }
@@ -1288,12 +1306,11 @@ impl Desktop {
 
 
     fn page_mods(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap().shrink(8.0);
-        let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
-        let ui = &mut child;
-        ui.label(RichText::new("Mod").size(28.0).color(TEXT));
-        ui.label(RichText::new("The home card icon is the loader. Jars are staged when you play.").size(15.0).color(MUTED));
+        ui.horizontal(|ui| {
+            icon_label(ui, I_CUBE, 22.0, TEXT);
+            ui.label(RichText::new("Mod").font(title_font(22.0)).color(TEXT));
+        });
+        ui.label(RichText::new("The home card icon is the loader. Jars are staged when you play.").font(sub_font(14.0)).color(MUTED));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             for (id, label) in [("vanilla", "Vanilla"), ("forge", "Forge"), ("fabric", "Fabric"), ("neoforge", "NeoForge"), ("optifine", "OptiFine")] {
@@ -1323,12 +1340,12 @@ impl Desktop {
             }
         });
         ui.add_space(12.0);
-        let (zone, zresp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), Sense::click());
+        let (zone, zresp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 72.0), Sense::click());
         let hover = zresp.hovered() || ui.input(|i| !i.raw.hovered_files.is_empty());
         ui.painter().rect_filled(zone, 12.0, if hover { SURFACE2 } else { SURFACE });
         dash_rect(ui, zone);
-        ui.painter().text(zone.center() + egui::vec2(0.0, -16.0), egui::Align2::CENTER_CENTER, "Drop .jar files here", egui::FontId::proportional(18.0), TEXT);
-        ui.painter().text(zone.center() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Choose files", egui::FontId::proportional(14.0), ACCENT);
+        ui.painter().text(zone.center() + egui::vec2(0.0, -10.0), egui::Align2::CENTER_CENTER, "Drop .jar files here", body_font(16.0), TEXT);
+        ui.painter().text(zone.center() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Choose files", body_font(13.0), ACCENT);
         if zresp.clicked() {
             if let Some(path) = crate::dialog::pick_file("Add a mod", "*.jar") {
                 let _ = crate::mods::add_path(&self.app, &path);
@@ -1338,17 +1355,20 @@ impl Desktop {
         ui.add_space(12.0);
         let enabled = self.mods.iter().filter(|m| m.1).count();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.app.p("mods").display().to_string()).size(13.0).color(MUTED));
+            ui.label(RichText::new(self.app.p("mods").display().to_string()).font(sub_font(13.0)).color(MUTED));
             ui.add_space(8.0);
             if button(ui, "Copy path", 110.0, 36.0, false) {
                 ui.output_mut(|o| o.copied_text = self.app.p("mods").display().to_string());
                 self.notice = "Path copied".into();
             }
             ui.add_space(12.0);
-            ui.label(RichText::new(format!("{} mods · {enabled} enabled", self.mods.len())).size(13.0).color(MUTED));
+            ui.label(RichText::new(format!("{} mods · {enabled} enabled", self.mods.len())).font(sub_font(13.0)).color(MUTED));
         });
         ui.add_space(8.0);
+        let list_h = ui.available_height().max(48.0);
         egui::ScrollArea::vertical()
+            .max_height(list_h)
+            .auto_shrink([false, false])
             .scroll_bar_visibility(if self.mods.is_empty() {
                 egui::scroll_area::ScrollBarVisibility::AlwaysHidden
             } else {
@@ -1363,7 +1383,7 @@ impl Desktop {
                             let _ = crate::mods::toggle(&self.app, &name);
                             spawn_mods(self.app.clone(), self.tx.clone());
                         }
-                        ui.label(RichText::new(format_bytes(size)).size(12.0).color(MUTED));
+                        ui.label(RichText::new(format_bytes(size)).font(sub_font(12.0)).color(MUTED));
                         if button(ui, "Remove", 90.0, 36.0, false) {
                             let _ = crate::mods::remove(&self.app, &name);
                             spawn_mods(self.app.clone(), self.tx.clone());
@@ -1376,25 +1396,31 @@ impl Desktop {
     }
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
-        let outer = ui.available_rect_before_wrap().shrink(8.0);
-        let _ = ui.allocate_rect(ui.available_rect_before_wrap(), Sense::hover());
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(outer));
-        let ui = &mut child;
-        ui.label(RichText::new("Settings").size(28.0).color(TEXT));
-        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            icon_label(ui, I_FLARE, 22.0, TEXT);
+            ui.label(RichText::new("Settings").font(title_font(22.0)).color(TEXT));
+        });
+        ui.add_space(2.0);
+        let width = ui.available_width();
+        let body_h = ui.available_height();
+        egui::ScrollArea::vertical()
+            .max_height(body_h)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+        ui.set_min_width(width);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(ui.available_width() - 300.0);
+                ui.set_width((width - 12.0) * 0.56);
                 card(ui, |ui| {
-                    ui.label(RichText::new("PROFILE").size(12.0).color(ACCENT));
-                    ui.add_space(8.0);
+                    ui.label(RichText::new("PROFILE").font(sub_font(12.0)).color(ACCENT));
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.set_width(ui.available_width() - 280.0);
-                            ui.label(RichText::new("Username").size(14.0).color(TEXT));
+                            ui.set_width((ui.available_width() - 180.0).max(140.0));
+                            ui.label(RichText::new("Username").font(body_font(14.0)).color(TEXT));
                             if field(ui, &mut self.username, ui.available_width(), "Player").changed() { self.save_settings(); }
-                            ui.add_space(8.0);
-                            ui.label(RichText::new("Skin").size(14.0).color(TEXT));
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("Skin").font(body_font(14.0)).color(TEXT));
                             ui.horizontal(|ui| {
                                 if button(ui, "Steve", 84.0, 40.0, self.skin == "preset:steve") {
                                     self.skin = "preset:steve".into();
@@ -1418,8 +1444,8 @@ impl Desktop {
                                     }
                                 }
                             });
-                            ui.add_space(8.0);
-                            ui.label(RichText::new("Cape").size(14.0).color(TEXT));
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("Cape").font(body_font(14.0)).color(TEXT));
                             ui.horizontal(|ui| {
                                 if button(ui, "Rus", 84.0, 40.0, self.cape == "preset:rus") {
                                     self.cape = "preset:rus".into();
@@ -1441,11 +1467,11 @@ impl Desktop {
                             });
                             if !self.import_error.is_empty() {
                                 ui.add_space(6.0);
-                                ui.label(RichText::new(&self.import_error).size(13.0).color(ERR));
+                                ui.label(RichText::new(&self.import_error).font(sub_font(13.0)).color(ERR));
                             }
-                            ui.add_space(8.0);
-                            ui.label(RichText::new("Local account only. No Microsoft login.").size(13.0).color(MUTED));
-                            ui.label(RichText::new(crate::state::offline_uuid(&self.username)).size(13.0).color(MUTED).monospace());
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("Local account only. No Microsoft login.").font(sub_font(12.0)).color(MUTED));
+                            ui.label(RichText::new(crate::state::offline_uuid(&self.username)).font(sub_font(12.0)).color(MUTED));
                         });
                         ui.vertical(|ui| {
                             let skin = self.skin_image();
@@ -1463,21 +1489,22 @@ impl Desktop {
                     });
                 });
             });
-            ui.add_space(16.0);
+            ui.add_space(10.0);
             ui.vertical(|ui| {
-                ui.set_min_width(280.0);
+                ui.set_width((width - 12.0) * 0.42);
                 card(ui, |ui| {
-                    ui.label(RichText::new("GAME").size(12.0).color(ACCENT));
-                    ui.add_space(8.0);
+                    ui.label(RichText::new("GAME").font(sub_font(12.0)).color(ACCENT));
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Memory").size(14.0).color(TEXT));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(format!("{} MB", self.ram)).size(14.0).color(TEXT));
-                        });
+                        ui.label(RichText::new("Memory").font(body_font(14.0)).color(TEXT));
+                        let value = format!("{} MB", self.ram);
+                        let used = ui.available_width();
+                        ui.add_space((used - 72.0).max(8.0));
+                        ui.label(RichText::new(value).font(body_font(14.0)).color(TEXT));
                     });
                     if slider(ui, &mut self.ram, 512, 16384) { self.save_settings(); }
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("Game window").size(14.0).color(TEXT));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("Game window").font(body_font(14.0)).color(TEXT));
                     ui.horizontal(|ui| {
                         let mut w = self.width.to_string();
                         let mut h = self.height.to_string();
@@ -1489,7 +1516,7 @@ impl Desktop {
                             if let Ok(n) = h.parse::<u32>() { self.height = n.clamp(480, 2160); self.save_settings(); }
                         }
                     });
-                    ui.add_space(8.0);
+                    ui.add_space(4.0);
                     if check(ui, &mut self.snapshots, "Show snapshots (series 26 and up)") {
                         self.save_settings();
                         spawn_versions(self.app.clone(), self.tx.clone());
@@ -1498,9 +1525,9 @@ impl Desktop {
                         self.save_settings();
                         spawn_versions(self.app.clone(), self.tx.clone());
                     }
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("Servers").size(14.0).color(TEXT));
-                    ui.label(RichText::new("Last three you play show on the right. None yet means the rail stays empty.").size(12.0).color(MUTED));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("Servers").font(body_font(14.0)).color(TEXT));
+                    ui.label(RichText::new("Played servers show on Home.").font(sub_font(12.0)).color(MUTED));
                     if field(ui, &mut self.server_name, 250.0, "Name").changed() {}
                     if field(ui, &mut self.server_addr, 250.0, "host or host:port").changed() {}
                     ui.horizontal(|ui| {
@@ -1520,7 +1547,7 @@ impl Desktop {
                     for (name, addr, icon) in rows {
                         ui.horizontal(|ui| {
                             let label = if name.is_empty() { addr.clone() } else { name.clone() };
-                            ui.label(RichText::new(label).size(13.0).color(if icon.is_empty() { MUTED } else { TEXT }));
+                            ui.label(RichText::new(label).font(body_font(13.0)).color(if icon.is_empty() { MUTED } else { TEXT }));
                             if button(ui, "Play", 64.0, 32.0, false) {
                                 self.join_server(name.clone(), addr.clone());
                             }
@@ -1531,14 +1558,17 @@ impl Desktop {
                             }
                         });
                     }
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("Data folder").size(14.0).color(TEXT));
-                    ui.label(RichText::new(self.app.dir.display().to_string()).size(12.0).color(MUTED));
-                    if button(ui, "Open", 88.0, 40.0, false) {
-                        if let Err(e) = crate::dialog::open_dir(&self.app.dir) { self.notice = e; }
-                    }
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Data").font(body_font(13.0)).color(TEXT));
+                        ui.label(RichText::new(self.app.dir.display().to_string()).font(sub_font(12.0)).color(MUTED));
+                        if button(ui, "Open", 64.0, 28.0, false) {
+                            if let Err(e) = crate::dialog::open_dir(&self.app.dir) { self.notice = e; }
+                        }
+                    });
                 });
             });
+        });
         });
     }
 }
@@ -1727,7 +1757,7 @@ fn button(ui: &mut egui::Ui, label: &str, width: f32, height: f32, primary: bool
     ui.painter().rect_filled(rect, 8.0, fill);
     if !primary { ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, BORDER_BTN), egui::StrokeKind::Inside); }
     if resp.has_focus() { ui.painter().rect_stroke(rect.expand(2.0), 8.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside); }
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(14.0), if primary { ON_ACCENT } else { TEXT });
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, body_font(14.0), if primary { ON_ACCENT } else { TEXT });
     resp.clicked()
 }
 
@@ -1742,25 +1772,26 @@ fn field(ui: &mut egui::Ui, text: &mut String, width: f32, hint: &str) -> egui::
         egui::TextEdit::singleline(text)
             .hint_text(hint)
             .desired_width(width)
-            .min_size(egui::vec2(width, 44.0))
-            .margin(egui::vec2(10.0, 12.0)),
+            .min_size(egui::vec2(width, 32.0))
+            .font(egui::TextStyle::Body)
+            .margin(egui::vec2(8.0, 6.0)),
     )
 }
 
 fn check(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(180.0), 26.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(180.0), 22.0), Sense::click());
     let box_r = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 6.0), egui::vec2(18.0, 18.0));
     ui.painter().rect_filled(box_r, 3.0, BG);
     ui.painter().rect_stroke(box_r, 3.0, egui::Stroke::new(1.5, if *on { ACCENT } else { BORDER_INPUT }), egui::StrokeKind::Inside);
     if *on { ui.painter().rect_filled(box_r.shrink(4.0), 2.0, ACCENT); }
-    ui.painter().text(rect.min + egui::vec2(28.0, 8.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional(14.0), TEXT);
+    ui.painter().text(rect.min + egui::vec2(28.0, 6.0), egui::Align2::LEFT_TOP, label, body_font(14.0), TEXT);
     if resp.has_focus() { ui.painter().rect_stroke(box_r.expand(2.0), 3.0, egui::Stroke::new(2.0, ACCENT), egui::StrokeKind::Outside); }
     if resp.clicked() { *on = !*on; true } else { false }
 }
 
 fn slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32) -> bool {
     let width = ui.available_width().max(160.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 28.0), Sense::click_and_drag());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 20.0), Sense::click_and_drag());
     let track = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.center().y - 3.0), egui::pos2(rect.right(), rect.center().y + 3.0));
     ui.painter().rect_filled(track, 3.0, BORDER_INPUT);
     let t = (*value as f32 - min as f32) / (max as f32 - min as f32);
@@ -2073,6 +2104,9 @@ const I_CUBE: char = '\u{F720}';
 const I_FLARE: char = '\u{E3E4}';
 const I_CLOCK: char = '\u{E8B5}';
 const I_DOWN: char = '\u{E5DB}';
+const I_FOLDER: char = '\u{E2C7}';
+const I_ADD: char = '\u{E145}';
+const I_CLOSE: char = '\u{E5CD}';
 
 fn drect(full: egui::Rect, x: f32, y: f32, w: f32, h: f32) -> egui::Rect {
     egui::Rect::from_min_max(egui::pos2(ux(full, x), uy(full, y)), egui::pos2(ux(full, x + w), uy(full, y + h)))
@@ -2089,6 +2123,20 @@ fn tab_icon(tab: Tab) -> char {
 
 fn paint_material(painter: &egui::Painter, center: egui::Pos2, size: f32, icon: char, color: egui::Color32) {
     painter.text(center, egui::Align2::CENTER_CENTER, icon.to_string(), icon_font(size), color);
+}
+
+fn use_page_fonts(ui: &mut egui::Ui) {
+    let styles = &mut ui.style_mut().text_styles;
+    styles.insert(egui::TextStyle::Heading, title_font(22.0));
+    styles.insert(egui::TextStyle::Body, body_font(14.0));
+    styles.insert(egui::TextStyle::Button, body_font(14.0));
+    styles.insert(egui::TextStyle::Small, sub_font(12.0));
+    styles.insert(egui::TextStyle::Monospace, sub_font(12.0));
+}
+
+fn icon_label(ui: &mut egui::Ui, icon: char, size: f32, color: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size + 6.0, size + 4.0), Sense::hover());
+    paint_material(ui.painter(), rect.center(), size, icon, color);
 }
 
 fn panel_card(painter: &egui::Painter, rect: egui::Rect) {

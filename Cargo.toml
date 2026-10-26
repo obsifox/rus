@@ -1,6 +1,6 @@
 [package]
 name = "launcher"
-version = "1.6.5"
+version = "1.6.6"
 edition = "2021"
 autobins = false
 description = "Rus — a Minecraft: Java Edition launcher written in Rust"

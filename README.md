@@ -123,8 +123,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.5/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.5/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.6/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.6/rus-windows-x64.exe) |
 
 Linux:
 
@@ -139,4 +139,4 @@ Windows: run `rus-windows-x64.exe`. It opens the Rus window. It does not open a 
 
 MIT. See [LICENSE](LICENSE).
 
-Outfit, Manrope and Source Sans 3 are used under the SIL Open Font License. Roboto and Material Symbols are used under the Apache License 2.0. Collection wallpapers stay on minecraft.net and are cached only in the data folder. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
+Outfit, Manrope and Source Sans 3 are used under the SIL Open Font License. Roboto and Material Symbols are used under the Apache License 2.0. Collection wallpapers are compressed inside Rus. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
