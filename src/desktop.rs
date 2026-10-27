@@ -27,7 +27,7 @@ const TEXT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
 const MUTED: egui::Color32 = egui::Color32::from_rgb(0xB4, 0xC2, 0xD4);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3B, 0x82, 0xF6);
 const ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
-const GOLD: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xBA, 0x4E);
+const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xCA, 0x54);
 fn glass_fill() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(12, 22, 40, 228) }
 fn glass_hover() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(22, 38, 64, 236) }
 const ERR: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xA0, 0x98);
@@ -98,6 +98,7 @@ struct Desktop {
     selected: String,
     papers: HashMap<String, egui::TextureHandle>,
     mark: Option<egui::TextureHandle>,
+    logo_title: Option<egui::TextureHandle>,
     grass: Option<egui::TextureHandle>,
     icon_forge: Option<egui::TextureHandle>,
     icon_fabric: Option<egui::TextureHandle>,
@@ -140,7 +141,6 @@ struct Desktop {
     draft_open: bool,
     draft_name: String,
     draft_version: String,
-    draft_loader: String,
 }
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
@@ -158,7 +158,7 @@ pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
 }
 
 fn icon_data() -> egui::IconData {
-    let img = image::load_from_memory(include_bytes!("../assets/mark-32.png")).expect("mark").to_rgba8();
+    let img = image::load_from_memory(include_bytes!("../assets/rus-icon.png")).expect("icon").to_rgba8();
     let (w, h) = img.dimensions();
     egui::IconData { rgba: img.into_raw(), width: w, height: h }
 }
@@ -175,7 +175,6 @@ impl Desktop {
         let (tx, rx) = mpsc::channel();
         let selected = if settings.last_version.is_empty() { "26.3".to_string() } else { settings.last_version.clone() };
         let draft_version = selected.clone();
-        let draft_loader = if settings.loader.is_empty() { "vanilla".to_string() } else { settings.loader.clone() };
         let mut preview = SkinPreview::default();
         preview.arms = if settings.skin_model == "slim" { ArmModel::Slim } else if settings.skin == "preset:alex" { ArmModel::Slim } else { ArmModel::Classic };
         let mut me = Self {
@@ -194,6 +193,7 @@ impl Desktop {
             selected,
             papers: HashMap::new(),
             mark: load_texture(&cc.egui_ctx, "mark", include_bytes!("../assets/mark-32.png")),
+            logo_title: load_texture(&cc.egui_ctx, "logo-title", include_bytes!("../assets/rus-logo-title.png")),
             grass: load_texture(&cc.egui_ctx, "vanilla", include_bytes!("../assets/vanilla-grass.png")),
             icon_forge: load_texture(&cc.egui_ctx, "forge", include_bytes!("../assets/loader-forge.png")),
             icon_fabric: load_texture(&cc.egui_ctx, "fabric", include_bytes!("../assets/loader-fabric.png")),
@@ -236,7 +236,6 @@ impl Desktop {
             draft_open: false,
             draft_name: String::new(),
             draft_version,
-            draft_loader,
         };
         me.bind_instances(&settings.last_instance);
         spawn_versions(app.clone(), tx.clone());
@@ -418,12 +417,46 @@ impl Desktop {
 
     fn loader_icon(&self) -> Option<&egui::TextureHandle> {
         match self.loader.as_str() {
-            "forge" => self.icon_forge.as_ref(),
+            "forge" | "forge+optifine" => self.icon_forge.as_ref(),
             "fabric" => self.icon_fabric.as_ref(),
             "neoforge" => self.icon_neoforge.as_ref(),
             "optifine" => self.icon_optifine.as_ref(),
             _ => self.grass.as_ref(),
         }
+    }
+
+    fn loader_active(&self, id: &str) -> bool {
+        match self.loader.as_str() {
+            "forge+optifine" => id == "forge" || id == "optifine",
+            other => other == id,
+        }
+    }
+
+    /// Forge is the installable half of the Forge + OptiFine pair.
+    fn install_loader_id(&self) -> String {
+        if self.loader == "forge+optifine" {
+            "forge".into()
+        } else {
+            self.loader.clone()
+        }
+    }
+
+    /// One loader at a time. OptiFine can also stay on with Forge.
+    fn choose_loader(&mut self, id: &str) {
+        let current = self.loader.as_str();
+        let next = match id {
+            "optifine" if current == "forge" => "forge+optifine",
+            "optifine" if current == "forge+optifine" => "forge",
+            "forge" if current == "forge+optifine" => "forge+optifine",
+            "vanilla" | "forge" | "fabric" | "neoforge" | "optifine" => id,
+            _ => return,
+        };
+        if self.loader == next {
+            return;
+        }
+        self.loader = next.to_string();
+        self.remember_instance();
+        self.save_settings();
     }
 
     fn launch_selected(&mut self) {
@@ -459,8 +492,9 @@ impl Desktop {
         } else {
             self.notice = format!("Starting {id}…");
         }
-        let profile = if self.loader != "vanilla" {
-            match crate::loaders::installed_profile(&self.app, &id, &self.loader) {
+        let launch_loader = self.install_loader_id();
+        let profile = if launch_loader != "vanilla" {
+            match crate::loaders::installed_profile(&self.app, &id, &launch_loader) {
                 Some(profile) => profile,
                 None => {
                     self.notice = format!("Install {} on the Instance tab first", crate::state::loader_label(&self.loader));
@@ -774,7 +808,8 @@ impl Desktop {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
             }
         }
-        self.paint_shared_tabs(ui, full);
+        let player = self.paint_player_bar(ui, full);
+        self.paint_shared_tabs(ui, full, player.right() + 8.0);
         self.paint_exit(ui, full);
         match self.tab {
             Tab::Home => self.paint_chrome(ui, full),
@@ -809,7 +844,7 @@ impl Desktop {
         }
     }
 
-    fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+    fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect, left: f32) -> egui::Rect {
         let tabs = [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings];
         let h = us(full, 40.0);
         let font = nav_font(us(full, 14.5));
@@ -818,36 +853,30 @@ impl Desktop {
         let mut widths = Vec::with_capacity(tabs.len());
         for tab in tabs {
             if tab == Tab::Home {
-                widths.push(h * 1.35);
+                widths.push(h * 0.28 + pad * 2.0);
             } else {
                 let label = tab.label().to_uppercase();
                 widths.push(tracked_width(ui.painter(), &label, font.clone(), track) + pad * 2.0);
             }
         }
         let total: f32 = widths.iter().sum();
-        let bar = egui::Rect::from_min_size(egui::pos2(ux(full, 22.0), uy(full, 16.0)), egui::vec2(total, h));
+        let bar = egui::Rect::from_min_size(egui::pos2(left, uy(full, 16.0)), egui::vec2(total, h));
         paint_hytale_bar(ui.painter(), bar);
 
         let mut x = bar.left();
         for (i, tab) in tabs.into_iter().enumerate() {
             let rect = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(widths[i], h));
-            if i > 0 {
-                let top = rect.top() + h * 0.26;
-                let bot = rect.bottom() - h * 0.26;
-                ui.painter().vline(rect.left(), top..=bot, egui::Stroke::new(1.0, egui::Color32::from_rgb(132, 152, 176)));
-            }
             let hit = ui.interact(rect, egui::Id::new("hynav").with(tab.label()), Sense::click());
             let on = self.tab == tab;
-            if on {
-                paint_active_fade(ui.painter(), rect);
-            }
-            let color = if hit.hovered() && !on {
+            let color = if on {
+                GOLD
+            } else if hit.hovered() {
                 egui::Color32::WHITE
             } else {
-                egui::Color32::from_rgb(220, 232, 235)
+                egui::Color32::from_rgb(236, 228, 214)
             };
             if tab == Tab::Home {
-                paint_nav_house(ui.painter(), rect.center(), h * 0.42, color);
+                paint_nav_house(ui.painter(), rect.center(), h * 0.28, color);
             } else {
                 let label = tab.label().to_uppercase();
                 paint_tracked(
@@ -870,6 +899,16 @@ impl Desktop {
             hit.on_hover_text(tab.label());
             x += widths[i];
         }
+        let sep_h = us(full, 52.0) * 0.44;
+        let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("tab-seps")));
+        let mut sx = bar.left();
+        for (i, width) in widths.iter().enumerate() {
+            if i > 0 {
+                paint_tab_sep(&fg, sx, bar.center().y - sep_h * 0.5, sep_h);
+            }
+            sx += width;
+        }
+        bar
     }
 
     fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
@@ -911,11 +950,8 @@ impl Desktop {
     fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let horizon_on = self.engine == "horizon";
         self.paint_recent_servers(ui, full);
-
-        self.paint_player_card(ui, full);
-
-        let version_card = self.paint_instance_card(ui, full);
-        paint_faded_bar(ui.painter(), version_card.right() + 16.0, version_card.top() + 8.0, version_card.height() - 16.0);
+        self.paint_title_logo(ui, full);
+        self.paint_instance_card(ui, full);
 
         let play_h = us(full, 52.0);
         let play_w = 112.0;
@@ -934,20 +970,15 @@ impl Desktop {
         };
         let note_font = lexend(us(full, 14.0));
         let note_w = ui.painter().layout_no_wrap(note.clone(), note_font.clone(), GOLD).size().x;
-        paint_diamond(ui.painter(), egui::pos2(play.right() - note_w - us(full, 18.0), play.top() - us(full, 16.0)), GOLD);
-        ui.painter().text(egui::pos2(play.right() - us(full, 4.0), play.top() - us(full, 16.0)), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
-        if self.selected.starts_with("26.3") {
-            let href = egui::Rect::from_min_size(
-                egui::pos2(play.left() - us(full, 124.0), play.top()),
-                egui::vec2(us(full, 112.0), play.height()),
-            );
-            if icon_button(ui, href, "horizon-toggle", horizon_on, "Start 26.3 with the Horizon client") {
-                self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
-                self.save_settings();
-            }
-            ui.painter().text(href.center(), egui::Align2::CENTER_CENTER, "HORIZON", nav_font(us(full, 12.0)), egui::Color32::from_rgb(220, 232, 235));
+        let note_y = play.top() - 16.0;
+        paint_diamond(ui.painter(), egui::pos2(play.right() - note_w - 14.0, note_y), GOLD);
+        ui.painter().text(egui::pos2(play.right() - 2.0, note_y), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
+        let horizon_here = self.selected.starts_with("26.3");
+        if horizon_here && self.paint_horizon_option(ui, play, horizon_on) {
+            self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
+            self.save_settings();
         }
-        if play_button(ui, play, label, live) {
+        if play_button(ui, play, label, live, horizon_on && !live) {
             self.join = None;
             self.play();
         }
@@ -969,57 +1000,193 @@ impl Desktop {
         }
     }
 
-    fn paint_player_card(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        // 12px from the right, 30px from the top, smaller than the last head.
-        let side = 22.0;
-        let head = egui::Rect::from_min_size(
-            egui::pos2((full.right() - 12.0 - side).round(), (full.top() + 30.0).round()),
-            egui::vec2(side, side),
+    /// Player card first: head, then the name. The tab bar follows it.
+    fn paint_player_bar(&mut self, ui: &mut egui::Ui, full: egui::Rect) -> egui::Rect {
+        let name = if self.username.is_empty() { "Player".to_string() } else { self.username.clone() };
+        let font = title_font(13.0);
+        let text_w = ui.painter().layout_no_wrap(name.clone(), font.clone(), TEXT).size().x;
+        let h = us(full, 40.0);
+        let head_s = (h - 10.0).clamp(16.0, 20.0);
+        let pad = 8.0;
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(ux(full, 22.0), uy(full, 16.0)),
+            egui::vec2(pad + head_s + 8.0 + text_w + 12.0, h),
         );
-        let name = if self.username.is_empty() { "Player" } else { self.username.as_str() };
-        let head_hit = ui.interact(head, egui::Id::new("player-card"), Sense::click());
+        paint_hytale_bar(ui.painter(), bar);
+        let head = egui::Rect::from_center_size(
+            egui::pos2(bar.left() + pad + head_s * 0.5, bar.center().y),
+            egui::vec2(head_s, head_s),
+        );
+        let hit = ui.interact(bar, egui::Id::new("player-card"), Sense::click());
         if let Some(face) = &self.avatar {
-            paint_head_glow(ui.painter(), head, face.id());
-            ui.painter().image(face.id(), head, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            ui.painter().add(
+                egui::epaint::RectShape::filled(head, 3.0, egui::Color32::WHITE)
+                    .with_texture(face.id(), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))),
+            );
         } else {
-            ui.painter().rect_filled(head, 1.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
+            ui.painter().rect_filled(head, 3.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
         }
-
-        let shown = head_hit.hovered();
-        let t = ui.ctx().animate_bool(egui::Id::new("player-name-rise"), shown);
-        if t > 0.02 {
-            let font = title_font(us(full, 14.0));
-            let pos = egui::pos2(head.center().x, head.bottom() + us(full, 4.0) + (1.0 - t) * us(full, 6.0));
-            let a = (t * 235.0) as u8;
-            ui.painter().text(pos + egui::vec2(0.0, 1.0), egui::Align2::CENTER_TOP, name, font.clone(), egui::Color32::from_black_alpha(a / 2));
-            ui.painter().text(pos, egui::Align2::CENTER_TOP, name, font, egui::Color32::from_rgba_unmultiplied(236, 228, 206, a));
-        }
-
-        if head_hit.hovered() {
+        ui.painter().text(
+            egui::pos2(head.right() + 8.0, bar.center().y),
+            egui::Align2::LEFT_CENTER,
+            &name,
+            font,
+            egui::Color32::from_rgb(236, 228, 214),
+        );
+        if hit.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
-        if head_hit.clicked() {
+        if hit.clicked() {
             self.tab = Tab::Settings;
         }
+        bar
     }
 
-    /// Version only, sized to that text. Display only — not a control.
+    /// Title mark, left of the window and above the version / play-time card.
+    fn paint_title_logo(&self, ui: &mut egui::Ui, full: egui::Rect) {
+        let Some(tex) = &self.logo_title else { return };
+        let card_top = uy(full, 640.0);
+        let h = 104.0 * 0.98;
+        let aspect = 780.0 / 481.0;
+        let w = h * aspect;
+        let rect = egui::Rect::from_min_size(egui::pos2(20.0, card_top - 50.0 - h + 4.0), egui::vec2(w, h));
+        ui.painter().image(
+            tex.id(),
+            rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+
+    /// Icon, version, loader, then play time. Display only — not a control.
     fn paint_instance_card(&self, ui: &mut egui::Ui, full: egui::Rect) -> egui::Rect {
         let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
-        let font = title_font(us(full, 15.0));
-        let text_w = ui.painter().layout_no_wrap(version.clone(), font.clone(), TEXT).size().x;
+        let loader = self.loader_line(&version);
+        let (number, unit, _) = crate::state::play_label(self.shown_play_ms());
+        let time = format!("{number}{unit}");
+        let ver_font = title_font(us(full, 15.0));
+        let sub_f = sub_font(10.0);
+        let time_font = title_font(us(full, 14.0));
+        let white = egui::Color32::WHITE;
+        let ver_w = ui.painter().layout_no_wrap(version.clone(), ver_font.clone(), GOLD).size().x;
+        let loader_w = ui.painter().layout_no_wrap(loader.clone(), sub_f.clone(), white).size().x;
+        let time_w = ui.painter().layout_no_wrap(time.clone(), time_font.clone(), TEXT).size().x;
+        let tail = self.status_tail();
+        let tail_w = ui.painter().layout_no_wrap(tail.clone(), time_font.clone(), TEXT).size().x;
+        let text_w = ver_w.max(loader_w);
         let h = us(full, 52.0);
-        let icon = us(full, 28.0);
-        let pad = 12.0;
-        let w = pad + icon + 8.0 + text_w + pad;
+        let icon = 22.0;
+        let pad = 10.0;
+        let right_gap = 12.0;
+        let clock_r = 8.0;
+        let clock_gap = 10.0;
+        let tail_gap = 8.0;
+        let tail_pad = 10.0;
+        let w = pad + icon + 8.0 + text_w + 8.0 + 2.0 + clock_gap + clock_r * 2.0 + 9.0 + time_w + tail_gap + 2.0 + tail_pad + tail_w + right_gap;
         let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 640.0)), egui::vec2(w, h));
         paint_hytale_bar(ui.painter(), card);
         let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + pad + icon * 0.5, card.center().y), egui::vec2(icon, icon));
         if let Some(tex) = self.loader_icon() {
             ui.painter().image(tex.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        ui.painter().text(egui::pos2(icon_rect.right() + 8.0, card.center().y), egui::Align2::LEFT_CENTER, &version, font, TEXT);
+        let text_x = icon_rect.right() + 8.0;
+        let ver_y = card.center().y - 7.0;
+        ui.painter().text(egui::pos2(text_x, ver_y), egui::Align2::LEFT_CENTER, &version, ver_font, GOLD);
+        ui.painter().text(egui::pos2(text_x, ver_y + 13.0), egui::Align2::LEFT_CENTER, &loader, sub_f, white);
+        let text_y = card.center().y;
+        let text_right = text_x + text_w;
+        let bar_x = text_right + 8.0;
+        paint_faded_bar(ui.painter(), bar_x, card.top() + card.height() * 0.28, card.height() * 0.44);
+        let clock_x = bar_x + 2.0 + clock_gap + clock_r;
+        paint_clock(ui.painter(), egui::pos2(clock_x, text_y), GOLD);
+        let time_x = clock_x + 16.0;
+        ui.painter().text(egui::pos2(time_x, text_y), egui::Align2::LEFT_CENTER, &time, time_font.clone(), TEXT);
+        let tail_bar_x = time_x + time_w + tail_gap;
+        paint_faded_bar(ui.painter(), tail_bar_x, card.top() + card.height() * 0.28, card.height() * 0.44);
+        ui.painter().text(egui::pos2(tail_bar_x + 2.0 + tail_pad, text_y), egui::Align2::LEFT_CENTER, &tail, time_font.clone(), TEXT);
         card
+    }
+
+    fn status_tail(&self) -> String {
+        if self.loader == "vanilla" || self.loader.is_empty() {
+            format!("Worlds {}", self.world_count())
+        } else {
+            format!("Mods {}", self.mod_count())
+        }
+    }
+
+    fn mod_count(&self) -> usize {
+        self.mods.iter().filter(|m| m.1).count()
+    }
+
+    fn world_count(&self) -> usize {
+        let root = if self.instance_id.is_empty() {
+            self.app.game_dir(&self.selected)
+        } else {
+            crate::instances::dir(&self.app, &self.instance_id)
+        };
+        std::fs::read_dir(root.join("saves"))
+            .map(|rd| rd.flatten().filter(|e| e.path().is_dir()).count())
+            .unwrap_or(0)
+    }
+
+    fn loader_line(&self, version: &str) -> String {
+        if self.loader == "forge+optifine" {
+            let forge = crate::loaders::rows_for(version, &self.loaders)
+                .into_iter()
+                .find(|row| row.id == "forge")
+                .map(|row| row.version)
+                .unwrap_or_default();
+            return if forge.is_empty() {
+                "forge + optifine".into()
+            } else {
+                format!("forge {forge} + optifine")
+            };
+        }
+        let name = match self.loader.as_str() {
+            "forge" => "forge",
+            "fabric" => "fabric",
+            "neoforge" => "neoforge",
+            "optifine" => "optifine",
+            _ => "vanilla",
+        };
+        let found = crate::loaders::rows_for(version, &self.loaders)
+            .into_iter()
+            .find(|row| row.id == self.loader.as_str());
+        match found {
+            Some(row) if !row.version.is_empty() => format!("{name} {}", row.version),
+            _ if name == "vanilla" => format!("vanilla {version}"),
+            _ => name.to_string(),
+        }
+    }
+
+    /// Text under Play. A click leaves it lit, with a glow, and restyles Play.
+    fn paint_horizon_option(&mut self, ui: &mut egui::Ui, play: egui::Rect, on: bool) -> bool {
+        let font = if on { title_font(12.5) } else { sub_font(12.0) };
+        let label = "Horizon";
+        let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), GOLD).size().x;
+        let row = egui::Rect::from_center_size(egui::pos2(play.center().x, play.bottom() + 11.0), egui::vec2(text_w + 16.0, 16.0));
+        let hit = ui.interact(row, egui::Id::new("horizon-option"), Sense::click());
+        let pos = row.center();
+        if on {
+            for (dx, dy, a) in [(0.0, 0.0, 42u8), (0.0, 1.0, 28), (-1.0, 0.0, 22), (1.0, 0.0, 22)] {
+                ui.painter().text(
+                    pos + egui::vec2(dx, dy),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    font.clone(),
+                    egui::Color32::from_rgba_unmultiplied(232, 186, 78, a),
+                );
+            }
+            ui.painter().text(pos, egui::Align2::CENTER_CENTER, label, font, egui::Color32::from_rgb(255, 228, 150));
+        } else {
+            let ink = if hit.hovered() { egui::Color32::from_rgb(255, 236, 196) } else { egui::Color32::from_rgb(220, 204, 168) };
+            ui.painter().text(pos, egui::Align2::CENTER_CENTER, label, font, ink);
+        }
+        if hit.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        hit.clicked()
     }
 
     fn account_bar(&mut self, ui: &mut egui::Ui, origin: egui::Pos2, h: f32) {
@@ -1242,8 +1409,12 @@ impl Desktop {
         let new_btn = drect(full, 590.0, 118.0, 128.0, 44.0);
         if pill_action(ui, new_btn, "New", true) {
             self.draft_name.clear();
-            self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
-            self.draft_loader = self.loader.clone();
+            let release = self.versions.iter().find(|v| v.channel == "release").map(|v| v.id.clone());
+            self.draft_version = if self.versions.iter().any(|v| v.id == self.selected && v.channel == "release") {
+                self.selected.clone()
+            } else {
+                release.unwrap_or_else(|| "26.3".into())
+            };
             self.draft_open = true;
         }
 
@@ -1264,14 +1435,12 @@ impl Desktop {
                 for inst in &rows {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), row_h), Sense::click());
                     let on = self.instance_id == inst.id;
-                    if on {
-                        paint_active_fade(ui.painter(), rect);
-                    } else if resp.hovered() {
+                    if resp.hovered() && !on {
                         ui.painter().rect_filled(rect, 0.0, egui::Color32::from_white_alpha(10));
                     }
-                    let line = egui::Rect::from_min_max(egui::pos2(rect.left() + 12.0, rect.bottom() - 1.0), egui::pos2(rect.right() - 8.0, rect.bottom()));
-                    ui.painter().rect_filled(line, 0.0, V_LINE);
-                    ui.painter().text(egui::pos2(rect.left() + us(full, 24.0), rect.center().y), egui::Align2::LEFT_CENTER, &inst.name, title_font(us(full, 18.0)), V_TEXT);
+                    paint_faded_rule(ui.painter(), rect.left() + 12.0, rect.bottom() - 1.0, rect.width() - 20.0);
+                    let name_ink = if on { GOLD } else { V_TEXT };
+                    ui.painter().text(egui::pos2(rect.left() + us(full, 24.0), rect.center().y), egui::Align2::LEFT_CENTER, &inst.name, title_font(us(full, 18.0)), name_ink);
                     ui.painter().text(egui::pos2(rect.left() + us(full, 250.0), rect.center().y), egui::Align2::LEFT_CENTER, &inst.version, body_font(us(full, 15.0)), V_TEXT);
                     ui.painter().text(egui::pos2(rect.left() + us(full, 420.0), rect.center().y), egui::Align2::LEFT_CENTER, crate::state::loader_label(&inst.loader), sub_font(us(full, 13.0)), V_GOLD);
                     let isolated = crate::instances::dir(&self.app, &inst.id).exists();
@@ -1300,7 +1469,8 @@ impl Desktop {
     fn paint_instance_popup(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let dim = ui.interact(full, egui::Id::new("instance-overlay"), Sense::click());
         ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(150));
-        let card = egui::Rect::from_center_size(full.center(), egui::vec2(520.0, 420.0));
+        // Room under the buttons so the bar stroke is not clipped by the card.
+        let card = egui::Rect::from_center_size(full.center(), egui::vec2(680.0, 404.0));
         paint_hytale_bar(ui.painter(), card);
         if dim.clicked() {
             if let Some(at) = dim.interact_pointer_pos() {
@@ -1310,61 +1480,84 @@ impl Desktop {
                 }
             }
         }
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink(18.0)));
-        child.set_clip_rect(card.shrink(18.0));
-        let ui = &mut child;
-        ui.horizontal(|ui| {
-            icon_label(ui, I_LAYERS, 20.0, V_GOLD);
-            ui.label(egui::RichText::new("New instance").font(title_font(22.0)).color(TEXT));
-        });
-        ui.label(egui::RichText::new("A separate world, options, and mods folder. The version files stay shared.").font(sub_font(13.0)).color(MUTED));
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("Name").font(body_font(14.0)).color(TEXT));
-        field(ui, &mut self.draft_name, ui.available_width(), "Survival, creative, test…");
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("Version").font(body_font(14.0)).color(TEXT));
-        let versions: Vec<String> = self.versions.iter().filter(|v| {
-            if v.channel == "release" { true } else { (self.snapshots && v.channel == "snapshot") || (self.previews && v.channel == "preview") }
-        }).map(|v| v.id.clone()).take(80).collect();
+        let left = card.left() + 22.0;
+        let right = card.right() - 22.0;
+        let width = right - left;
+        ui.painter().text(egui::pos2(left, card.top() + 30.0), egui::Align2::LEFT_CENTER, "New instance", title_font(20.0), TEXT);
+        ui.painter().text(
+            egui::pos2(left, card.top() + 50.0),
+            egui::Align2::LEFT_CENTER,
+            "A separate world, options, and mods folder.",
+            sub_font(12.0),
+            MUTED,
+        );
+        paint_faded_rule(ui.painter(), left, card.top() + 66.0, width);
+        ui.painter().text(egui::pos2(left, card.top() + 84.0), egui::Align2::LEFT_CENTER, "Name", sub_font(12.0), MUTED);
+        let field_rect = egui::Rect::from_min_size(egui::pos2(left, card.top() + 96.0), egui::vec2(width, 36.0));
+        paint_popup_field(ui, field_rect, &mut self.draft_name, "Survival, creative, test…");
+
+        ui.painter().text(egui::pos2(left, card.top() + 152.0), egui::Align2::LEFT_CENTER, "Version", sub_font(12.0), MUTED);
+        let gap = 8.0;
+        let row_h = 36.0;
+        let grid = egui::Rect::from_min_size(egui::pos2(left, card.top() + 166.0), egui::vec2(width, row_h * 3.0 + gap * 2.0));
+        let versions: Vec<String> = self.versions.iter().filter(|v| v.channel == "release").map(|v| v.id.clone()).collect();
         let picked = self.draft_version.clone();
-        egui::ScrollArea::vertical().id_salt("instance-versions").max_height(96.0).auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            if versions.is_empty() {
-                ui.label(egui::RichText::new("Loading versions…").font(sub_font(13.0)).color(MUTED));
-            }
-            for id in versions {
-                let on = id == picked;
-                if button(ui, &id, 120.0, 28.0, on) {
-                    self.draft_version = id;
-                }
-            }
-        });
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("Loader").font(body_font(14.0)).color(TEXT));
-        ui.horizontal(|ui| {
-            for (id, label) in [("vanilla", "Vanilla"), ("forge", "Forge"), ("fabric", "Fabric"), ("neoforge", "NeoForge"), ("optifine", "OptiFine")] {
-                if button(ui, label, 78.0, 30.0, self.draft_loader == id) {
-                    self.draft_loader = id.into();
-                }
-            }
-        });
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            if button(ui, "Cancel", 110.0, 36.0, false) {
-                self.draft_open = false;
-            }
-            if button(ui, "Create", 120.0, 36.0, true) {
-                let inst = crate::instances::create(&self.draft_name, &self.draft_version, &self.draft_loader);
-                let _ = std::fs::create_dir_all(crate::instances::dir(&self.app, &inst.id));
-                self.instance_id = inst.id.clone();
-                self.selected = inst.version.clone();
-                self.loader = inst.loader.clone();
-                self.instances.push(inst);
-                crate::instances::save(&self.app, &self.instances);
-                self.save_settings();
-                self.draft_open = false;
-            }
-        });
+        let mut chosen: Option<String> = None;
+        if versions.is_empty() {
+            ui.painter().text(grid.center(), egui::Align2::CENTER_CENTER, "Loading releases…", body_font(14.0), MUTED);
+        } else {
+            let mut grid_ui = ui.new_child(egui::UiBuilder::new().max_rect(grid));
+            grid_ui.set_clip_rect(grid);
+            style_popup_scroll(&mut grid_ui);
+            let content_w = (grid.width() - 14.0).max(120.0);
+            let vw = (content_w - gap * 3.0) / 4.0;
+            egui::ScrollArea::vertical()
+                .id_salt("popup-versions")
+                .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                .show(&mut grid_ui, |ui| {
+                    ui.set_width(content_w);
+                    ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                    for chunk in versions.chunks(4) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            ui.set_height(row_h);
+                            for id in chunk {
+                                if button(ui, id, vw, row_h, id == &picked) {
+                                    chosen = Some(id.clone());
+                                }
+                            }
+                        });
+                    }
+                });
+        }
+        if let Some(id) = chosen {
+            self.draft_version = id;
+        }
+
+        paint_faded_rule(ui.painter(), left, card.top() + 308.0, width);
+        let btn_y = card.top() + 324.0;
+        let create = egui::Rect::from_min_size(egui::pos2(right - 128.0, btn_y), egui::vec2(128.0, 40.0));
+        let cancel = egui::Rect::from_min_size(egui::pos2(create.left() - 10.0 - 112.0, btn_y), egui::vec2(112.0, 40.0));
+        if bar_button(ui, "popup-create", create, "Create", true) {
+            let version = if self.draft_version.is_empty() {
+                versions.first().cloned().unwrap_or_else(|| "26.3".into())
+            } else {
+                self.draft_version.clone()
+            };
+            let inst = crate::instances::create(&self.draft_name, &version, "vanilla");
+            let _ = std::fs::create_dir_all(crate::instances::dir(&self.app, &inst.id));
+            self.instance_id = inst.id.clone();
+            self.selected = inst.version.clone();
+            self.loader = inst.loader.clone();
+            self.instances.push(inst);
+            crate::instances::save(&self.app, &self.instances);
+            self.save_settings();
+            self.draft_open = false;
+        }
+        if bar_button(ui, "popup-cancel", cancel, "Cancel", false) {
+            self.draft_open = false;
+        }
     }
 
     fn paint_loader_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
@@ -1380,16 +1573,13 @@ impl Desktop {
         for (i, row) in rows.iter().enumerate() {
             let y = 168.0 + i as f32 * 78.0;
             let rect = drect(full, 768.0, y, 483.0, 78.0);
-            let on = self.loader == row.id;
+            let on = self.loader_active(row.id);
             let hit = ui.interact(rect, egui::Id::new("loader-row").with(row.id), Sense::click());
-            if on {
-                paint_active_fade(ui.painter(), rect);
-            } else if hit.hovered() && self.shot.is_none() {
+            if hit.hovered() && !on && self.shot.is_none() {
                 ui.painter().rect_filled(rect, 0.0, egui::Color32::from_white_alpha(8));
             }
             if i + 1 < rows.len() {
-                let line = egui::Rect::from_min_max(egui::pos2(rect.left() + us(full, 16.0), rect.bottom() - 1.0), egui::pos2(rect.right() - us(full, 12.0), rect.bottom()));
-                ui.painter().rect_filled(line, 0.0, V_LINE);
+                paint_faded_rule(ui.painter(), rect.left() + us(full, 16.0), rect.bottom() - 1.0, rect.width() - us(full, 28.0));
             }
             let well = egui::Rect::from_center_size(egui::pos2(ux(full, 814.0), rect.center().y), egui::vec2(us(full, 46.0), us(full, 46.0)));
             ui.painter().rect_filled(well, us(full, 8.0), loader_well(row.id));
@@ -1397,7 +1587,8 @@ impl Desktop {
                 let inner = well.shrink(us(full, 5.0));
                 ui.painter().image(tex.id(), inner, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
             }
-            ui.painter().text(egui::pos2(ux(full, 852.0), rect.center().y), egui::Align2::LEFT_CENTER, row.name, title_font(us(full, 18.0)), V_TEXT);
+            let name_ink = if on { GOLD } else { V_TEXT };
+            ui.painter().text(egui::pos2(ux(full, 852.0), rect.center().y), egui::Align2::LEFT_CENTER, row.name, title_font(us(full, 18.0)), name_ink);
             let detail = loader_detail(row, &mc, self.loaders.ready);
             let detail_color = if row.kind == crate::loaders::Badge::Preview { V_GOLD } else { V_MUTED };
             ui.painter().text(egui::pos2(ux(full, 1004.0), rect.center().y), egui::Align2::LEFT_CENTER, &detail, body_font(us(full, 15.0)), detail_color);
@@ -1411,15 +1602,22 @@ impl Desktop {
             }
         }
         if let Some(id) = clicked {
-            self.loader = id;
-            self.remember_instance();
-            self.save_settings();
+            self.choose_loader(&id);
         }
 
-        let selected = rows.iter().find(|r| r.id == self.loader).cloned();
+        let primary = self.install_loader_id();
+        let selected = rows.iter().find(|r| r.id == primary).cloned();
         let foot_y = uy(full, 578.0);
         paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), foot_y), egui::Align2::LEFT_CENTER, "SELECTED LOADER", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.1));
-        if let Some(row) = &selected {
+        if self.loader == "forge+optifine" {
+            let ver = selected.as_ref().map(|r| r.version.as_str()).unwrap_or("");
+            let right = if ver.is_empty() {
+                "FORGE + OPTIFINE".to_string()
+            } else {
+                format!("FORGE {ver} + OPTIFINE")
+            };
+            paint_tracked(ui.painter(), egui::pos2(ux(full, 1230.0), foot_y), egui::Align2::RIGHT_CENTER, &right, sub_font(us(full, 13.0)), V_GOLD, us(full, 0.7));
+        } else if let Some(row) = &selected {
             let right = if row.version.is_empty() {
                 row.name.to_uppercase()
             } else {
@@ -1462,7 +1660,7 @@ impl Desktop {
 
     fn on_install(&mut self) {
         let mc = self.selected.clone();
-        let loader = self.loader.clone();
+        let loader = self.install_loader_id();
         if mc.is_empty() {
             self.notice = "Select a version".into();
             return;
@@ -1495,11 +1693,16 @@ impl Desktop {
 
     fn spawn_loader_install(&mut self) {
         let mc = self.selected.clone();
-        let loader = self.loader.clone();
+        let combo = self.loader == "forge+optifine";
+        let loader = self.install_loader_id();
         let version = crate::loaders::rows_for(&mc, &self.loaders).into_iter().find(|r| r.id == loader).map(|r| r.version).unwrap_or_default();
         let app = self.app.clone();
         let tx = self.tx.clone();
-        self.notice = format!("Installing {loader} {version} for {mc}…");
+        self.notice = if combo {
+            format!("Installing forge {version} for {mc}. OptiFine has no build to add.")
+        } else {
+            format!("Installing {loader} {version} for {mc}…")
+        };
         std::thread::spawn(move || {
             let msg = match crate::loaders::install(&app, &mc, &loader, &version) {
                 Ok(id) => format!("{loader} is installed ({id})"),
@@ -1519,10 +1722,9 @@ impl Desktop {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             for (id, label) in [("vanilla", "Vanilla"), ("forge", "Forge"), ("fabric", "Fabric"), ("neoforge", "NeoForge"), ("optifine", "OptiFine")] {
-                let on = self.loader == id;
+                let on = self.loader_active(id);
                 if button(ui, label, 108.0, 40.0, on) {
-                    self.loader = id.into();
-                    self.save_settings();
+                    self.choose_loader(id);
                 }
             }
         });
@@ -1799,10 +2001,9 @@ fn icon_button(ui: &mut egui::Ui, rect: egui::Rect, id: &str, on: bool, tip: &st
     clicked
 }
 
-fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool) -> bool {
+fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool, horizon: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("play"), Sense::click());
-    let ink = egui::Color32::from_rgb(255, 244, 242);
-    if stop {
+    let (text_color, font) = if stop {
         let fill = if hit.hovered() {
             egui::Color32::from_rgb(214, 92, 98)
         } else {
@@ -1810,20 +2011,22 @@ fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool) -> 
         };
         ui.painter().rect_filled(rect, 2.0, fill);
         ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(232, 156, 156)), egui::StrokeKind::Inside);
-        let s = rect.height() * 0.13;
-        let box_r = egui::Rect::from_center_size(egui::pos2(rect.left() + rect.width() * 0.28, rect.center().y), egui::vec2(s * 1.7, s * 1.7));
-        ui.painter().rect_filled(box_r, 1.0, ink);
+        (egui::Color32::from_rgb(255, 244, 242), nav_font(rect.height() * 0.32))
+    } else if horizon {
+        ui.painter().rect_filled(rect.expand(3.0), 5.0, egui::Color32::from_rgba_unmultiplied(232, 186, 78, 36));
+        let fill = if hit.hovered() {
+            egui::Color32::from_rgb(168, 126, 48)
+        } else {
+            egui::Color32::from_rgb(138, 102, 36)
+        };
+        ui.painter().rect_filled(rect, 5.0, fill);
+        ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(1.15, egui::Color32::from_rgb(236, 206, 128)), egui::StrokeKind::Inside);
+        (egui::Color32::from_rgb(255, 236, 196), body_font(rect.height() * 0.34))
     } else {
         paint_hytale_bar(ui.painter(), rect);
-        let tri = egui::pos2(rect.left() + rect.width() * 0.28, rect.center().y);
-        let s = rect.height() * 0.16;
-        let stroke = egui::Stroke::new(1.35, egui::Color32::from_rgb(220, 232, 235));
-        ui.painter().line_segment([tri + egui::vec2(-s * 0.45, -s), tri + egui::vec2(s * 0.7, 0.0)], stroke);
-        ui.painter().line_segment([tri + egui::vec2(s * 0.7, 0.0), tri + egui::vec2(-s * 0.45, s)], stroke);
-        ui.painter().line_segment([tri + egui::vec2(-s * 0.45, s), tri + egui::vec2(-s * 0.45, -s)], stroke);
-    }
-    let text_color = if stop { ink } else { egui::Color32::from_rgb(220, 232, 235) };
-    ui.painter().text(egui::pos2(rect.left() + rect.width() * 0.62, rect.center().y), egui::Align2::CENTER_CENTER, label, nav_font(rect.height() * 0.32), text_color);
+        (egui::Color32::from_rgb(255, 246, 226), nav_font(rect.height() * 0.32))
+    };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, text_color);
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
@@ -1836,9 +2039,9 @@ fn note_width(ui: &egui::Ui, text: &str) -> f32 {
 
 fn empty_gold(hot: bool) -> egui::Color32 {
     if hot {
-        egui::Color32::from_rgb(255, 232, 168)
+        egui::Color32::from_rgb(255, 236, 176)
     } else {
-        egui::Color32::from_rgb(236, 198, 112)
+        GOLD
     }
 }
 
@@ -1847,16 +2050,6 @@ fn paint_empty_cross(painter: &egui::Painter, center: egui::Pos2, size: f32, col
     let stroke = egui::Stroke::new(1.15, color);
     painter.line_segment([center + egui::vec2(-h, -h), center + egui::vec2(h, h)], stroke);
     painter.line_segment([center + egui::vec2(h, -h), center + egui::vec2(-h, h)], stroke);
-}
-
-fn paint_head_glow(painter: &egui::Painter, head: egui::Rect, tex: egui::TextureId) {
-    let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
-    // Faint larger copies of the head, not a stroked frame.
-    for i in (1..6).rev() {
-        let grow = i as f32 * 1.35;
-        let alpha = (12 + (6 - i) * 4) as u8;
-        painter.image(tex, head.expand(grow), uv, egui::Color32::from_white_alpha(alpha));
-    }
 }
 
 fn paint_exit_icon(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
@@ -1994,20 +2187,89 @@ fn nav_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
 fn button(ui: &mut egui::Ui, label: &str, width: f32, height: f32, primary: bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
     paint_hytale_bar(ui.painter(), rect);
-    if primary || resp.hovered() {
-        paint_active_fade(ui.painter(), rect);
-    }
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(13.0), egui::Color32::from_rgb(220, 232, 235));
+    let ink = if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(13.0), ink);
     if resp.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
     resp.clicked()
 }
 
+fn bar_button(ui: &mut egui::Ui, id: &str, rect: egui::Rect, label: &str, primary: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
+    paint_hytale_bar(ui.painter(), rect);
+    let ink = if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(13.0), ink);
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
 fn chip(ui: &mut egui::Ui, label: &str, on: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(72.0, 26.0), Sense::hover());
     ui.painter().rect_stroke(rect, 12.0, egui::Stroke::new(1.0, if on { ACCENT } else { BORDER_BTN }), egui::StrokeKind::Inside);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), if on { ACCENT } else { MUTED });
+}
+
+fn paint_popup_field(ui: &mut egui::Ui, rect: egui::Rect, text: &mut String, hint: &str) {
+    paint_hytale_bar(ui.painter(), rect);
+    let inner = rect.shrink2(egui::vec2(10.0, 6.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+    child.set_clip_rect(rect.shrink(2.0));
+    let vis = child.visuals_mut();
+    let clear = egui::Stroke::new(0.0, egui::Color32::TRANSPARENT);
+    vis.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+    vis.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+    vis.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+    vis.widgets.inactive.bg_stroke = clear;
+    vis.widgets.hovered.bg_stroke = clear;
+    vis.widgets.active.bg_stroke = clear;
+    vis.override_text_color = Some(TEXT);
+    child.add(
+        egui::TextEdit::singleline(text)
+            .hint_text(RichText::new(hint).color(MUTED))
+            .desired_width(inner.width())
+            .font(egui::TextStyle::Body)
+            .frame(false)
+            .margin(egui::vec2(0.0, 1.0)),
+    );
+}
+
+fn style_popup_scroll(ui: &mut egui::Ui) {
+    let scroll = &mut ui.style_mut().spacing.scroll;
+    *scroll = egui::style::ScrollStyle::solid();
+    scroll.bar_width = 4.0;
+    scroll.bar_inner_margin = 6.0;
+    scroll.bar_outer_margin = 1.0;
+    scroll.handle_min_length = 28.0;
+    scroll.foreground_color = true;
+    let pale = egui::Color32::from_rgb(176, 196, 214);
+    let vis = ui.visuals_mut();
+    vis.extreme_bg_color = egui::Color32::from_rgb(36, 62, 112);
+    vis.widgets.inactive.fg_stroke.color = pale;
+    vis.widgets.hovered.fg_stroke.color = GOLD;
+    vis.widgets.active.fg_stroke.color = GOLD;
+    vis.widgets.inactive.bg_fill = pale;
+    vis.widgets.hovered.bg_fill = GOLD;
+    vis.widgets.active.bg_fill = GOLD;
+    vis.widgets.inactive.corner_radius = egui::CornerRadius::same(2);
+}
+
+fn style_popup_fields(ui: &mut egui::Ui) {
+    let vis = ui.visuals_mut();
+    let fill = egui::Color32::from_rgb(18, 32, 58);
+    let edge = egui::Stroke::new(1.0, egui::Color32::from_rgb(176, 196, 214));
+    vis.extreme_bg_color = fill;
+    vis.widgets.inactive.bg_fill = fill;
+    vis.widgets.inactive.bg_stroke = edge;
+    vis.widgets.hovered.bg_fill = fill;
+    vis.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, GOLD);
+    vis.widgets.active.bg_fill = fill;
+    vis.widgets.active.bg_stroke = egui::Stroke::new(1.0, GOLD);
+    vis.widgets.inactive.corner_radius = egui::CornerRadius::same(2);
+    vis.widgets.hovered.corner_radius = egui::CornerRadius::same(2);
+    vis.widgets.active.corner_radius = egui::CornerRadius::same(2);
 }
 
 fn field(ui: &mut egui::Ui, text: &mut String, width: f32, hint: &str) -> egui::Response {
@@ -2056,8 +2318,8 @@ fn slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32) -> bool {
 
 fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(37, 53, 86))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(158, 176, 198)))
+        .fill(egui::Color32::from_rgb(36, 62, 112))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(206, 168, 96)))
         .corner_radius(2.0)
         .inner_margin(14.0)
         .show(ui, add);
@@ -2109,28 +2371,61 @@ fn paint_fade(ui: &egui::Ui, rect: egui::Rect) {
 fn paint_frame(ctx: &egui::Context) {
     let rect = ctx.screen_rect();
     ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("frame")))
-        .rect_stroke(rect.shrink(0.5), 4.0, egui::Stroke::new(1.25, BORDER_BTN), egui::StrokeKind::Inside);
+        .rect_stroke(rect.shrink(0.5), 4.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(148, 168, 190)), egui::StrokeKind::Inside);
+}
+
+fn paint_tab_sep(painter: &egui::Painter, x: f32, y: f32, h: f32) {
+    let x = x.round();
+    let n = h.round().max(8.0) as i32;
+    for i in 0..n {
+        let t = (i as f32 + 0.5) / n as f32;
+        let k = (1.0 - (t - 0.5).abs() * 2.0).powf(1.35);
+        let alpha = (k * 230.0) as u8;
+        if alpha < 10 {
+            continue;
+        }
+        let yy = y + i as f32;
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x, yy), egui::pos2(x + 1.0, yy + 1.0)),
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(214, 224, 234, alpha),
+        );
+    }
+}
+
+fn paint_faded_rule(painter: &egui::Painter, x: f32, y: f32, w: f32) {
+    let steps = w.ceil().clamp(16.0, 72.0) as i32;
+    for i in 0..steps {
+        let t = (i as f32 + 0.5) / steps as f32;
+        let k = (1.0 - (t - 0.5).abs() * 2.0).powf(1.35);
+        let alpha = (k * 170.0) as u8;
+        if alpha < 8 {
+            continue;
+        }
+        let x0 = x + w * (i as f32 / steps as f32);
+        let x1 = x + w * ((i + 1) as f32 / steps as f32);
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x0, y), egui::pos2(x1, y + 1.0)),
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(214, 224, 234, alpha),
+        );
+    }
 }
 
 fn paint_faded_bar(painter: &egui::Painter, x: f32, y: f32, h: f32) {
-    let steps = h.ceil().max(8.0) as i32;
+    let x = x.round() + 0.5;
+    let steps = h.ceil().clamp(12.0, 48.0) as i32;
     for i in 0..steps {
         let t = (i as f32 + 0.5) / steps as f32;
-        let k = (1.0 - (t - 0.5).abs() * 2.0).powf(1.25);
-        let alpha = (k * 188.0) as u8;
+        let k = (1.0 - (t - 0.5).abs() * 2.0).powf(1.35);
+        let alpha = (k * 235.0) as u8;
+        if alpha < 12 {
+            continue;
+        }
         let y0 = y + h * (i as f32 / steps as f32);
         let y1 = y + h * ((i + 1) as f32 / steps as f32);
-        let soft = (alpha as f32 * 0.38) as u8;
-        painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(x - 2.0, y0), egui::pos2(x + 2.0, y1)),
-            0.0,
-            egui::Color32::from_rgba_unmultiplied(176, 196, 214, soft),
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(x - 0.65, y0), egui::pos2(x + 0.65, y1)),
-            0.0,
-            egui::Color32::from_rgba_unmultiplied(186, 204, 220, alpha),
-        );
+        let color = egui::Color32::from_rgba_unmultiplied(214, 224, 234, alpha);
+        painter.vline(x, y0..=y1, egui::Stroke::new(1.0, color));
     }
 }
 
@@ -2660,28 +2955,34 @@ fn panel_card(painter: &egui::Painter, rect: egui::Rect) {
 }
 
 fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
-    let fill = egui::Color32::from_rgb(37, 53, 86);
-    let edge = egui::Color32::from_rgb(158, 176, 198);
+    let fill = egui::Color32::from_rgb(36, 62, 112);
+    let edge = egui::Color32::from_rgb(176, 196, 214);
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    let plate = egui::Color32::from_rgb(186, 200, 216);
-    let s = 3.4;
-    for (cx, cy) in [
-        (rect.left(), rect.top()),
-        (rect.right(), rect.top()),
-        (rect.left(), rect.bottom()),
-        (rect.right(), rect.bottom()),
-    ] {
-        painter.rect_stroke(
-            egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(s, s)),
-            0.0,
-            egui::Stroke::new(1.15, plate),
-            egui::StrokeKind::Inside,
-        );
+    paint_corner_caps(painter, rect, edge);
+}
+
+fn paint_corner_caps(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.15, color);
+    let leg = 5.0;
+    let inset = 1.5;
+    let corners = [
+        (rect.left() + inset, rect.top() + inset, 1.0, 1.0),
+        (rect.right() - inset, rect.top() + inset, -1.0, 1.0),
+        (rect.left() + inset, rect.bottom() - inset, 1.0, -1.0),
+        (rect.right() - inset, rect.bottom() - inset, -1.0, -1.0),
+    ];
+    for (x, y, sx, sy) in corners {
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x + sx * leg, y)], stroke);
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + sy * leg)], stroke);
     }
 }
 
 fn paint_active_fade(painter: &egui::Painter, rect: egui::Rect) {
+    paint_active_fade_strength(painter, rect, 1.0);
+}
+
+fn paint_active_fade_strength(painter: &egui::Painter, rect: egui::Rect, strength: f32) {
     let fade = painter.with_clip_rect(rect.shrink(0.5));
     if rect.width() > rect.height() * 1.8 {
         let steps = (rect.width() / 1.6).ceil().clamp(28.0, 72.0) as i32;
@@ -2689,10 +2990,10 @@ fn paint_active_fade(painter: &egui::Painter, rect: egui::Rect) {
             let t0 = i as f32 / steps as f32;
             let t1 = (i + 1) as f32 / steps as f32;
             let dist = ((t0 + t1) * 0.5 - 0.5).abs() * 2.0;
-            let k = (1.0 - dist).powf(1.45);
-            let r = 37.0 + 78.0 * k;
-            let g = 53.0 + 46.0 * k;
-            let b = 86.0 - 22.0 * k;
+            let k = (1.0 - dist).powf(1.45) * strength;
+            let r = 36.0 + 150.0 * k;
+            let g = 62.0 + 96.0 * k;
+            let b = 112.0 - 36.0 * k;
             let band = egui::Rect::from_min_max(
                 egui::pos2(rect.left() + rect.width() * t0, rect.top()),
                 egui::pos2(rect.left() + rect.width() * t1, rect.bottom()),
@@ -2706,7 +3007,7 @@ fn paint_active_fade(painter: &egui::Painter, rect: egui::Rect) {
     let steps = 16;
     for i in (0..steps).rev() {
         let t = i as f32 / (steps as f32 - 1.0);
-        let k = (1.0 - t).powf(1.6);
+        let k = (1.0 - t).powf(1.6) * strength;
         let r = 37.0 + 96.0 * k;
         let g = 53.0 + 54.0 * k;
         let b = 86.0 - 30.0 * k;
@@ -2858,10 +3159,7 @@ fn paint_badge(painter: &egui::Painter, rect: egui::Rect, label: &str, kind: cra
 fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("loader-install"), Sense::click());
     paint_hytale_bar(ui.painter(), rect);
-    if enabled {
-        paint_active_fade(ui.painter(), rect);
-    }
-    let ink = if enabled { egui::Color32::from_rgb(220, 232, 235) } else { V_MUTED };
+    let ink = if enabled { GOLD } else { V_MUTED };
     if enabled {
         paint_material(ui.painter(), egui::pos2(rect.center().x - us_rect(rect, 54.0), rect.center().y), rect.height() * 0.36, I_DOWN, ink);
     }
@@ -2875,10 +3173,7 @@ fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: boo
 fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("pill-action").with(label), Sense::click());
     paint_hytale_bar(ui.painter(), rect);
-    if primary || hit.hovered() {
-        paint_active_fade(ui.painter(), rect);
-    }
-    let ink = egui::Color32::from_rgb(220, 232, 235);
+    let ink = if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) };
     paint_material(ui.painter(), egui::pos2(rect.left() + rect.height() * 0.42, rect.center().y), rect.height() * 0.34, I_ADD, ink);
     ui.painter().text(egui::pos2(rect.center().x + 8.0, rect.center().y), egui::Align2::CENTER_CENTER, label, nav_font(rect.height() * 0.32), ink);
     if hit.hovered() {

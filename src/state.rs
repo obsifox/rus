@@ -74,6 +74,7 @@ fn default_loader() -> String {
 pub fn loader_label(id: &str) -> &'static str {
     match id {
         "forge" => "FORGE",
+        "forge+optifine" => "FORGE + OPTIFINE",
         "fabric" => "FABRIC",
         "neoforge" => "NEOFORGE",
         "optifine" => "OPTIFINE",

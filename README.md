@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/mark.png" width="128" height="128" alt="Rus mark: a pixel R on a dark tile">
+  <img src="assets/mark.png" width="128" height="128" alt="Rus mark: a carved stone R">
 </p>
 
 <h1 align="center">Rus</h1>
