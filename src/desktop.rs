@@ -960,10 +960,10 @@ impl Desktop {
     }
 
     fn paint_player_card(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        // The wide account bar is only the head. The name rises under it on hover.
-        let side = us(full, 88.0).round().max(48.0);
+        // Top-right of the window, under the exit mark. Only the head.
+        let side = us(full, 40.0).round().max(28.0);
         let head = egui::Rect::from_min_size(
-            egui::pos2(ux(full, 22.0).round(), uy(full, 686.0).round() - side),
+            egui::pos2(ux(full, 1218.0).round(), uy(full, 65.0).round()),
             egui::vec2(side, side),
         );
         let name = if self.username.is_empty() { "Player" } else { self.username.as_str() };
@@ -975,35 +975,27 @@ impl Desktop {
             ui.painter().rect_filled(head, 1.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
         }
 
-        let cross = us(full, 13.0).max(10.0);
-        let cross_at = egui::pos2(head.right() + us(full, 9.0), head.top() - us(full, 8.0));
-        let exit = egui::Rect::from_center_size(cross_at, egui::vec2(us(full, 18.0), us(full, 18.0)));
-        let exit_hit = ui.interact(exit, egui::Id::new("exit-home"), Sense::click());
-        paint_empty_cross(ui.painter(), cross_at, cross, empty_gold(exit_hit.hovered()));
-
         let shown = head_hit.hovered();
         let t = ui.ctx().animate_bool(egui::Id::new("player-name-rise"), shown);
         if t > 0.02 {
             let font = title_font(us(full, 14.0));
-            let pos = egui::pos2(head.center().x, head.bottom() + us(full, 5.0) + (1.0 - t) * us(full, 8.0));
+            let pos = egui::pos2(head.center().x, head.bottom() + us(full, 4.0) + (1.0 - t) * us(full, 6.0));
             let a = (t * 235.0) as u8;
             ui.painter().text(pos + egui::vec2(0.0, 1.0), egui::Align2::CENTER_TOP, name, font.clone(), egui::Color32::from_black_alpha(a / 2));
             ui.painter().text(pos, egui::Align2::CENTER_TOP, name, font, egui::Color32::from_rgba_unmultiplied(236, 228, 206, a));
         }
 
-        if exit_hit.hovered() || head_hit.hovered() {
+        if head_hit.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
-        if exit_hit.clicked() {
-            self.quit(ui.ctx());
-        } else if head_hit.clicked() {
+        if head_hit.clicked() {
             self.tab = Tab::Settings;
         }
     }
 
     /// Version and play time. Display only — not a control.
     fn paint_instance_card(&self, ui: &mut egui::Ui, full: egui::Rect) {
-        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 124.0), uy(full, 640.0)), egui::vec2(us(full, 594.0), us(full, 52.0)));
+        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 640.0)), egui::vec2(us(full, 692.0), us(full, 52.0)));
         paint_hytale_bar(ui.painter(), card);
         let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 34.0), card.center().y), egui::vec2(us(full, 36.0), us(full, 36.0)));
         if let Some(icon) = self.loader_icon() {
@@ -1206,12 +1198,9 @@ impl Desktop {
     }
 
     fn paint_exit(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        // Home keeps this mark on the profile head. Other pages still need a way out.
-        if self.tab == Tab::Home {
-            return;
-        }
-        let center = egui::pos2(ux(full, 1248.0), uy(full, 34.0));
-        let size = us(full, 11.0).max(8.0);
+        // Same corner as the reference: above and to the right of the profile head.
+        let center = egui::pos2(ux(full, 1263.0), uy(full, 41.0));
+        let size = us(full, 12.0).max(8.0);
         let exit = egui::Rect::from_center_size(center, egui::vec2(us(full, 18.0), us(full, 18.0)));
         let hit = ui.interact(exit, egui::Id::new("exit-version"), Sense::click());
         paint_empty_cross(ui.painter(), center, size, empty_gold(hit.hovered()));
@@ -1835,9 +1824,9 @@ fn paint_empty_cross(painter: &egui::Painter, center: egui::Pos2, size: f32, col
 fn paint_head_glow(painter: &egui::Painter, head: egui::Rect, tex: egui::TextureId) {
     let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
     // Faint larger copies of the head, not a stroked frame.
-    for i in (1..5).rev() {
-        let grow = i as f32 * 1.6;
-        let alpha = (8 + (5 - i) * 4) as u8;
+    for i in (1..6).rev() {
+        let grow = i as f32 * 1.35;
+        let alpha = (12 + (6 - i) * 4) as u8;
         painter.image(tex, head.expand(grow), uv, egui::Color32::from_white_alpha(alpha));
     }
 }
