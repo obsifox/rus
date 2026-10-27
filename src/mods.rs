@@ -118,8 +118,13 @@ pub fn toggle(app: &App, name: &str) -> Result<bool, String> {
 
 /// Copy enabled jars into an instance's mods folder. Returns how many.
 pub fn stage(app: &App, version: &str) -> Result<usize, String> {
+    stage_into(app, &app.game_dir(version))
+}
+
+/// Copy enabled jars into an isolated instance directory.
+pub fn stage_into(app: &App, game_dir: &std::path::Path) -> Result<usize, String> {
     let src = library_dir(app);
-    let dst = app.game_dir(version).join("mods");
+    let dst = game_dir.join("mods");
     fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
     let disabled = disabled_set(app);
     let mut n = 0;

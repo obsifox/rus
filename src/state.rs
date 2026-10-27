@@ -51,6 +51,9 @@ pub struct Settings {
     pub show_snapshots: bool,
     pub show_previews: bool,
     pub last_version: String,
+    /// Selected isolated instance. Empty on older configs.
+    #[serde(default)]
+    pub last_instance: String,
     pub demo: bool,
     /// vanilla | horizon
     #[serde(default = "default_engine")]
@@ -111,6 +114,7 @@ impl Default for Settings {
             show_snapshots: false,
             show_previews: false,
             last_version: String::new(),
+            last_instance: String::new(),
             demo: false,
             engine: "vanilla".into(),
             loader: "vanilla".into(),

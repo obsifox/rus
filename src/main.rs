@@ -7,6 +7,7 @@
 mod desktop;
 mod dialog;
 mod horizon;
+mod instances;
 mod install;
 mod java;
 mod loaders;

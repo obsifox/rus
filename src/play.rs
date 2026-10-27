@@ -58,6 +58,11 @@ pub fn build_command(app: &App, id: &str) -> Result<(Command, PathBuf), String> 
 }
 
 pub fn build_command_join(app: &App, id: &str, server: Option<&str>) -> Result<(Command, PathBuf), String> {
+    let dir = app.game_dir(id);
+    build_command_at(app, id, &dir, server)
+}
+
+pub fn build_command_at(app: &App, id: &str, game_dir: &std::path::Path, server: Option<&str>) -> Result<(Command, PathBuf), String> {
     let settings = app.settings();
     let version_dir = app.p(&format!("versions/{id}"));
     if !version_dir.join(format!("{id}.json")).exists() {
@@ -87,8 +92,7 @@ pub fn build_command_join(app: &App, id: &str, server: Option<&str>) -> Result<(
         .and_then(|i| i.as_str())
         .unwrap_or("legacy")
         .to_string();
-    let game_dir = app.game_dir(id);
-    fs::create_dir_all(&game_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(game_dir).map_err(|e| e.to_string())?;
 
     let component = meta
         .get("javaVersion")
@@ -319,6 +323,11 @@ pub fn launch(app: &App, id: &str) -> Result<serde_json::Value, String> {
 }
 
 pub fn launch_join(app: &App, id: &str, server: Option<&str>) -> Result<serde_json::Value, String> {
+    let dir = app.game_dir(id);
+    launch_at(app, id, &dir, server)
+}
+
+pub fn launch_at(app: &App, id: &str, game_dir: &std::path::Path, server: Option<&str>) -> Result<serde_json::Value, String> {
     {
         let mut r = running().lock().unwrap();
         if let Some(proc) = r.as_mut() {
@@ -330,11 +339,11 @@ pub fn launch_join(app: &App, id: &str, server: Option<&str>) -> Result<serde_js
     }
     // re-stage mods + skin pack so tweaks apply without reinstalling
     let settings = app.settings();
-    let gdir = app.game_dir(id);
-    let _ = crate::mods::stage(app, id);
+    let gdir = game_dir.to_path_buf();
+    let _ = crate::mods::stage_into(app, &gdir);
     let _ = crate::skin::build_pack(app, &gdir, &settings.username, &settings.skin, &settings.cape);
 
-    let (mut cmd, javaw) = build_command_join(app, id, server)?;
+    let (mut cmd, javaw) = build_command_at(app, id, &gdir, server)?;
     let log_path = app.p(&format!("logs/{id}.log"));
     let child = cmd.spawn().map_err(|e| format!("Failed to start Java: {e}"))?;
     crate::sandbox::attach(&child);

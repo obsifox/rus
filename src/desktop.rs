@@ -48,7 +48,7 @@ enum Page {
 impl Tab {
     fn from_name(s: &str) -> Self {
         match s {
-            "versions" | "version" => Tab::Versions,
+            "versions" | "version" | "instance" | "instances" => Tab::Versions,
             "mods" => Tab::Mods,
             "settings" => Tab::Settings,
             _ => Tab::Home,
@@ -57,7 +57,7 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::Home => "Home",
-            Tab::Versions => "Version",
+            Tab::Versions => "Instance",
             Tab::Mods => "Mod",
             Tab::Settings => "Settings",
         }
@@ -135,6 +135,12 @@ struct Desktop {
     play_after: bool,
     preview: SkinPreview,
     drop_hover: bool,
+    instances: Vec<crate::instances::Instance>,
+    instance_id: String,
+    draft_open: bool,
+    draft_name: String,
+    draft_version: String,
+    draft_loader: String,
 }
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
@@ -167,7 +173,9 @@ impl Desktop {
         let _ = crate::skin::materialize_preset(&app, "cape", "rus");
         let settings = app.settings();
         let (tx, rx) = mpsc::channel();
-        let selected = if settings.last_version.is_empty() { "26.3".into() } else { settings.last_version.clone() };
+        let selected = if settings.last_version.is_empty() { "26.3".to_string() } else { settings.last_version.clone() };
+        let draft_version = selected.clone();
+        let draft_loader = if settings.loader.is_empty() { "vanilla".to_string() } else { settings.loader.clone() };
         let mut preview = SkinPreview::default();
         preview.arms = if settings.skin_model == "slim" { ArmModel::Slim } else if settings.skin == "preset:alex" { ArmModel::Slim } else { ArmModel::Classic };
         let mut me = Self {
@@ -223,7 +231,14 @@ impl Desktop {
             play_after: false,
             preview,
             drop_hover: false,
+            instances: Vec::new(),
+            instance_id: String::new(),
+            draft_open: false,
+            draft_name: String::new(),
+            draft_version,
+            draft_loader,
         };
+        me.bind_instances(&settings.last_instance);
         spawn_versions(app.clone(), tx.clone());
         spawn_mods(app.clone(), tx.clone());
         spawn_loaders(tx.clone());
@@ -231,6 +246,14 @@ impl Desktop {
         if me.shot.is_some() && me.tab == Tab::Versions {
             me.loader = "forge".into();
             me.selected = "26.3".into();
+            if let Some(inst) = me.instances.first_mut() {
+                inst.version = "26.3".into();
+                inst.loader = "forge".into();
+                if inst.name.trim().is_empty() {
+                    inst.name = "26.3".into();
+                }
+                me.instance_id = inst.id.clone();
+            }
         }
         me
     }
@@ -327,6 +350,7 @@ impl Desktop {
         s.engine = self.engine.clone();
         s.loader = self.loader.clone();
         s.last_version = self.selected.clone();
+        s.last_instance = self.instance_id.clone();
         s.skin_model = match self.preview.arms {
             ArmModel::Slim => "slim".into(),
             ArmModel::Classic => "classic".into(),
@@ -344,15 +368,52 @@ impl Desktop {
         if finished.is_empty() {
             return;
         }
-        for (version, ms) in finished {
-            *self.playtime.entry(version).or_insert(0) += ms;
+        for (_version, ms) in finished {
+            let key = if self.instance_id.is_empty() { self.selected.clone() } else { self.instance_id.clone() };
+            *self.playtime.entry(key).or_insert(0) += ms;
         }
         save_playtime(&self.app, &self.playtime);
     }
 
     fn shown_play_ms(&self) -> u128 {
-        let stored = self.playtime.get(&self.selected).copied().unwrap_or(0);
+        let key = if self.instance_id.is_empty() { self.selected.as_str() } else { self.instance_id.as_str() };
+        let stored = self.playtime.get(key).copied().unwrap_or(0);
         stored + crate::play::live_ms_for(&self.selected).unwrap_or(0)
+    }
+
+    fn bind_instances(&mut self, preferred: &str) {
+        self.instances = crate::instances::ensure(&self.app, &self.selected, &self.loader);
+        let pick = self.instances.iter().find(|i| i.id == preferred).or_else(|| self.instances.first());
+        if let Some(inst) = pick.cloned() {
+            self.instance_id = inst.id;
+            if !inst.version.is_empty() {
+                self.selected = inst.version;
+            }
+            if !inst.loader.is_empty() {
+                self.loader = inst.loader;
+            }
+        }
+    }
+
+    fn current_instance(&self) -> Option<&crate::instances::Instance> {
+        self.instances.iter().find(|i| i.id == self.instance_id)
+    }
+
+    fn select_instance(&mut self, id: &str) {
+        let Some(inst) = self.instances.iter().find(|i| i.id == id).cloned() else { return };
+        self.instance_id = inst.id;
+        self.selected = inst.version;
+        self.loader = inst.loader;
+        self.save_settings();
+        self.ensure_fabric();
+    }
+
+    fn remember_instance(&mut self) {
+        if let Some(inst) = self.instances.iter_mut().find(|i| i.id == self.instance_id) {
+            inst.version = self.selected.clone();
+            inst.loader = self.loader.clone();
+            crate::instances::save(&self.app, &self.instances);
+        }
     }
 
     fn loader_icon(&self) -> Option<&egui::TextureHandle> {
@@ -384,6 +445,12 @@ impl Desktop {
         let app = self.app.clone();
         let tx = self.tx.clone();
         let join = self.join.clone();
+        let game_dir = if self.instance_id.is_empty() {
+            self.app.game_dir(&id)
+        } else {
+            crate::instances::dir(&self.app, &self.instance_id)
+        };
+        let _ = std::fs::create_dir_all(&game_dir);
         if let Some(addr) = join.clone() {
             crate::state::mark_played(&mut self.servers, &self.join_name, &addr);
             self.app.save_servers(&self.servers);
@@ -396,7 +463,7 @@ impl Desktop {
             match crate::loaders::installed_profile(&self.app, &id, &self.loader) {
                 Some(profile) => profile,
                 None => {
-                    self.notice = format!("Install {} on the Version tab first", crate::state::loader_label(&self.loader));
+                    self.notice = format!("Install {} on the Instance tab first", crate::state::loader_label(&self.loader));
                     self.tab = Tab::Versions;
                     return;
                 }
@@ -405,7 +472,7 @@ impl Desktop {
             id.clone()
         };
         std::thread::spawn(move || {
-            let msg = match crate::play::launch_join(&app, &profile, join.as_deref()) {
+            let msg = match crate::play::launch_at(&app, &profile, &game_dir, join.as_deref()) {
                 Ok(_) => {
                     if let Some(addr) = join.as_deref() {
                         format!("{id} is joining {addr}")
@@ -692,12 +759,17 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
+        if self.tab != Tab::Home {
+            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(0x16, 0x20, 0x39, 166));
+        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
-        let drag = egui::Rect::from_min_max(full.left_top(), egui::pos2(full.right(), uy(full, 18.0)));
-        let drag_hit = ui.interact(drag, egui::Id::new("window-drag"), Sense::drag());
-        if drag_hit.drag_started() {
-            ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+        if !self.draft_open {
+            let drag = egui::Rect::from_min_max(full.left_top(), egui::pos2(full.right(), uy(full, 18.0)));
+            let drag_hit = ui.interact(drag, egui::Id::new("window-drag"), Sense::drag());
+            if drag_hit.drag_started() {
+                ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+            }
         }
         self.paint_shared_tabs(ui, full);
         self.paint_exit(ui, full);
@@ -706,6 +778,9 @@ impl Desktop {
             Tab::Versions => self.paint_version_page(ui, full),
             Tab::Mods => self.page_in_panel(ui, full, Page::Mods),
             Tab::Settings => self.page_in_panel(ui, full, Page::Settings),
+        }
+        if self.draft_open {
+            self.paint_instance_popup(ui, full);
         }
     }
 
@@ -733,10 +808,10 @@ impl Desktop {
 
     fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let tabs = [
-            (Tab::Home, 26.0, 121.0),
-            (Tab::Versions, 160.0, 141.0),
-            (Tab::Mods, 314.0, 109.0),
-            (Tab::Settings, 436.0, 147.0),
+            (Tab::Home, 26.0, 112.0),
+            (Tab::Versions, 148.0, 168.0),
+            (Tab::Mods, 326.0, 108.0),
+            (Tab::Settings, 444.0, 150.0),
         ];
         for (tab, x, w) in tabs {
             let rect = drect(full, x, 26.0, w, 54.0);
@@ -783,36 +858,11 @@ impl Desktop {
     }
 
     fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        self.account_bar(ui, egui::pos2(ux(full, 604.0), uy(full, 26.0)), us(full, 54.0));
         let horizon_on = self.engine == "horizon";
         self.paint_recent_servers(ui, full);
 
-        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 632.0)), egui::vec2(us(full, 470.0), us(full, 64.0)));
-        let card_hit = ui.interact(card, egui::Id::new("instance-card"), Sense::click());
-        glass(ui.painter(), card, 10.0, if card_hit.hovered() { glass_hover() } else { glass_fill() });
-        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 36.0), card.center().y), egui::vec2(us(full, 42.0), us(full, 42.0)));
-        if let Some(icon) = self.loader_icon() {
-            ui.painter().image(icon.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-        }
-        let engine = crate::state::loader_label(&self.loader);
-        ui.painter().text(egui::pos2(card.left() + us(full, 64.0), card.center().y), egui::Align2::LEFT_CENTER, engine, lexend(us(full, 14.0)), GOLD);
-        ui.painter().text(egui::pos2(card.left() + us(full, 168.0), card.center().y), egui::Align2::LEFT_CENTER, &self.selected, lexend(us(full, 20.0)), TEXT);
-        ui.painter().line_segment(
-            [egui::pos2(card.left() + us(full, 250.0), card.center().y - 12.0), egui::pos2(card.left() + us(full, 250.0), card.center().y + 12.0)],
-            egui::Stroke::new(1.0, BORDER_BTN),
-        );
-        paint_clock(ui.painter(), egui::pos2(card.left() + us(full, 278.0), card.center().y), GOLD);
-        paint_play_stat(ui, egui::pos2(card.left() + us(full, 296.0), card.center().y), self.shown_play_ms(), us(full, 16.0));
-        if card_hit.clicked() {
-            let at = card_hit.interact_pointer_pos().unwrap_or(card.center());
-            if icon_rect.contains(at) {
-                self.loader = crate::state::next_loader(&self.loader).into();
-                self.save_settings();
-            } else {
-                self.tab = Tab::Versions;
-            }
-        }
-        card_hit.on_hover_text("Click the icon to change the loader. Click the card to choose a version.");
+        self.paint_player_card(ui, full);
+        self.paint_instance_card(ui, full);
 
         let play = egui::Rect::from_min_size(egui::pos2(ux(full, 990.0), uy(full, 622.0)), egui::vec2(us(full, 263.0), us(full, 75.0)));
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -859,6 +909,43 @@ impl Desktop {
             Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
             None => "Release".into(),
         }
+    }
+
+    fn paint_player_card(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 632.0)), egui::vec2(us(full, 250.0), us(full, 64.0)));
+        let hit = ui.interact(card, egui::Id::new("player-card"), Sense::click());
+        glass(ui.painter(), card, 12.0, if hit.hovered() { glass_hover() } else { glass_fill() });
+        let head = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 34.0), card.center().y), egui::vec2(us(full, 40.0), us(full, 40.0)));
+        ui.painter().rect_filled(head, 4.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
+        if let Some(face) = &self.avatar {
+            ui.painter().image(face.id(), head.shrink(1.0), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        }
+        let name = if self.username.is_empty() { "Player" } else { self.username.as_str() };
+        ui.painter().text(egui::pos2(card.left() + us(full, 64.0), card.center().y - us(full, 8.0)), egui::Align2::LEFT_CENTER, name, title_font(us(full, 16.0)), TEXT);
+        ui.painter().text(egui::pos2(card.left() + us(full, 64.0), card.center().y + us(full, 10.0)), egui::Align2::LEFT_CENTER, "Local account", sub_font(us(full, 12.0)), MUTED);
+        if hit.clicked() {
+            self.tab = Tab::Settings;
+        }
+        if hit.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        hit.on_hover_text("Profile");
+    }
+
+    /// Version and play time. Display only — not a control.
+    fn paint_instance_card(&self, ui: &mut egui::Ui, full: egui::Rect) {
+        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 288.0), uy(full, 632.0)), egui::vec2(us(full, 430.0), us(full, 64.0)));
+        glass(ui.painter(), card, 12.0, glass_fill());
+        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 34.0), card.center().y), egui::vec2(us(full, 36.0), us(full, 36.0)));
+        if let Some(icon) = self.loader_icon() {
+            ui.painter().image(icon.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        }
+        let name = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| self.selected.clone());
+        let detail = format!("{} · {}", crate::state::loader_label(&self.loader), self.selected);
+        ui.painter().text(egui::pos2(card.left() + us(full, 62.0), card.center().y - us(full, 9.0)), egui::Align2::LEFT_CENTER, &name, title_font(us(full, 15.0)), TEXT);
+        ui.painter().text(egui::pos2(card.left() + us(full, 62.0), card.center().y + us(full, 10.0)), egui::Align2::LEFT_CENTER, &detail, body_font(us(full, 13.0)), MUTED);
+        paint_clock(ui.painter(), egui::pos2(card.right() - us(full, 118.0), card.center().y), GOLD);
+        paint_play_stat(ui, egui::pos2(card.right() - us(full, 100.0), card.center().y), self.shown_play_ms(), us(full, 15.0));
     }
 
     fn account_bar(&mut self, ui: &mut egui::Ui, origin: egui::Pos2, h: f32) {
@@ -1070,46 +1157,34 @@ impl Desktop {
     fn paint_version_list(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let panel = drect(full, 26.0, 106.0, 719.0, 587.0);
         panel_card(ui.painter(), panel);
-        let release = drect(full, 46.0, 120.0, 120.0, 44.0);
-        let snapshot = drect(full, 178.0, 120.0, 134.0, 44.0);
-        if segment_button(ui, release, "RELEASE", self.release_view, "channel-release") {
-            self.release_view = true;
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 48.0), uy(full, 142.0)), egui::Align2::LEFT_CENTER, "INSTANCES", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.2));
+        let count = format!("{}", self.instances.len());
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 560.0), uy(full, 142.0)), egui::Align2::RIGHT_CENTER, &count, sub_font(us(full, 12.0)), V_MUTED, us(full, 1.0));
+        let new_btn = drect(full, 590.0, 118.0, 128.0, 44.0);
+        if pill_action(ui, new_btn, "New", true) {
+            self.draft_name.clear();
+            self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
+            self.draft_loader = self.loader.clone();
+            self.draft_open = true;
         }
-        if segment_button(ui, snapshot, "SNAPSHOT", !self.release_view, "channel-snapshot") {
-            self.release_view = false;
-            if !self.snapshots {
-                self.snapshots = true;
-                self.save_settings();
-                spawn_versions(self.app.clone(), self.tx.clone());
-            }
-        }
-        let q = self.query.to_lowercase();
-        let rows: Vec<Ver> = self
-            .versions
-            .iter()
-            .filter(|v| if self.release_view { v.channel == "release" } else { v.channel == "snapshot" || v.channel == "preview" })
-            .filter(|v| q.is_empty() || v.id.to_lowercase().contains(&q))
-            .cloned()
-            .collect();
-        let count = format!("{} {}", rows.len(), if self.release_view { "RELEASES" } else { "SNAPSHOTS" });
-        paint_tracked(ui.painter(), egui::pos2(drect(full, 720.0, 142.0, 1.0, 1.0).left(), uy(full, 142.0)), egui::Align2::RIGHT_CENTER, &count, sub_font(us(full, 12.0)), V_MUTED, us(full, 1.1));
 
         let list = drect(full, 28.0, 174.0, 715.0, 460.0);
         let row_h = uy(full, 234.0) - uy(full, 174.0);
         let painter = ui.painter().clone();
+        let rows: Vec<crate::instances::Instance> = self.instances.clone();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         child.set_clip_rect(list);
         let ui = &mut child;
         ui.set_min_size(list.size());
         if rows.is_empty() {
-            ui.painter().text(list.center(), egui::Align2::CENTER_CENTER, if self.versions.is_empty() { "Loading versions…" } else { "No versions in this channel" }, body_font(us(full, 15.0)), V_MUTED);
+            ui.painter().text(list.center(), egui::Align2::CENTER_CENTER, "No instances yet", body_font(us(full, 15.0)), V_MUTED);
             let _ = ui.allocate_rect(list, Sense::hover());
         } else {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("instance-list").auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                 ui.set_width(list.width());
-                for v in &rows {
+                for inst in &rows {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), row_h), Sense::click());
-                    let on = self.selected == v.id;
+                    let on = self.instance_id == inst.id;
                     if on {
                         ui.painter().rect_filled(rect, 0.0, V_SEL);
                         let bar = egui::Rect::from_min_size(rect.min, egui::vec2(us(full, 4.0), rect.height()));
@@ -1119,32 +1194,15 @@ impl Desktop {
                     }
                     let line = egui::Rect::from_min_max(egui::pos2(rect.left() + 12.0, rect.bottom() - 1.0), egui::pos2(rect.right() - 8.0, rect.bottom()));
                     ui.painter().rect_filled(line, 0.0, V_LINE);
-                    let id_at = egui::pos2(rect.left() + us(full, 24.0), rect.center().y);
-                    ui.painter().text(id_at, egui::Align2::LEFT_CENTER, &v.id, title_font(us(full, 20.0)), V_TEXT);
-                    let name_x = rect.left() + us(full, 168.0);
-                    ui.painter().text(egui::pos2(name_x, rect.center().y), egui::Align2::LEFT_CENTER, self.paper_for(&v.id).title, body_font(us(full, 16.0)), V_TEXT);
-                    let date = crate::loaders::dot_date(&v.released);
-                    let date_font = sub_font(us(full, 14.0));
-                    let date_w = ui.painter().layout_no_wrap(date.clone(), date_font.clone(), V_MUTED).size().x;
-                    let date_at = egui::pos2(rect.right() - us(full, 18.0) - date_w, rect.center().y);
-                    ui.painter().text(date_at, egui::Align2::LEFT_CENTER, &date, date_font, V_MUTED);
-                    paint_material(ui.painter(), date_at - egui::vec2(us(full, 16.0), 0.0), us(full, 15.0), I_CLOCK, V_GOLD);
-                    let mut cursor = date_at.x - us(full, 34.0);
-                    if v.installed {
-                        let dot = egui::pos2(cursor, rect.center().y);
-                        ui.painter().circle_filled(dot, us(full, 4.5), V_GREEN);
-                        cursor -= us(full, 16.0);
-                    }
-                    let latest = v.id == self.version_latest || (self.version_latest.is_empty() && rows.first().map(|r| r.id.as_str()) == Some(v.id.as_str()) && v.channel == "release");
-                    if latest && self.release_view {
-                        let badge = egui::Rect::from_min_size(egui::pos2(cursor - us(full, 72.0), rect.center().y - us(full, 11.0)), egui::vec2(us(full, 64.0), us(full, 22.0)));
-                        ui.painter().rect_filled(badge, us(full, 6.0), egui::Color32::from_rgb(58, 67, 78));
-                        ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, "LATEST", sub_font(us(full, 11.0)), V_GOLD);
+                    ui.painter().text(egui::pos2(rect.left() + us(full, 24.0), rect.center().y), egui::Align2::LEFT_CENTER, &inst.name, title_font(us(full, 18.0)), V_TEXT);
+                    ui.painter().text(egui::pos2(rect.left() + us(full, 250.0), rect.center().y), egui::Align2::LEFT_CENTER, &inst.version, body_font(us(full, 15.0)), V_TEXT);
+                    ui.painter().text(egui::pos2(rect.left() + us(full, 420.0), rect.center().y), egui::Align2::LEFT_CENTER, crate::state::loader_label(&inst.loader), sub_font(us(full, 13.0)), V_GOLD);
+                    let isolated = crate::instances::dir(&self.app, &inst.id).exists();
+                    if isolated {
+                        ui.painter().circle_filled(egui::pos2(rect.right() - us(full, 28.0), rect.center().y), us(full, 4.5), V_GREEN);
                     }
                     if resp.clicked() {
-                        self.selected = v.id.clone();
-                        self.save_settings();
-                        self.ensure_fabric();
+                        self.select_instance(&inst.id);
                     }
                     if resp.hovered() {
                         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -1156,9 +1214,81 @@ impl Desktop {
         let foot = drect(full, 28.0, 636.0, 715.0, 55.0);
         painter.rect_filled(egui::Rect::from_min_max(egui::pos2(panel.left() + 1.0, foot.top()), egui::pos2(panel.right() - 1.0, foot.top() + 1.0)), 0.0, V_BORDER);
         paint_tracked(&painter, egui::pos2(foot.left() + us(full, 16.0), foot.center().y), egui::Align2::LEFT_CENTER, "SELECTED", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.2));
-        painter.text(egui::pos2(foot.left() + us(full, 108.0), foot.center().y), egui::Align2::LEFT_CENTER, &self.selected, title_font(us(full, 16.0)), V_GOLD);
+        let selected_name = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| self.selected.clone());
+        painter.text(egui::pos2(foot.left() + us(full, 108.0), foot.center().y), egui::Align2::LEFT_CENTER, &selected_name, title_font(us(full, 16.0)), V_GOLD);
         let drop = self.paper_for(&self.selected).title.to_uppercase();
         paint_tracked(&painter, egui::pos2(foot.right() - us(full, 16.0), foot.center().y), egui::Align2::RIGHT_CENTER, &drop, sub_font(us(full, 12.0)), V_MUTED, us(full, 1.0));
+    }
+
+    fn paint_instance_popup(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let dim = ui.interact(full, egui::Id::new("instance-overlay"), Sense::click());
+        ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(150));
+        let card = egui::Rect::from_center_size(full.center(), egui::vec2(520.0, 420.0));
+        ui.painter().rect_filled(card, 16.0, egui::Color32::from_rgb(0x16, 0x20, 0x39));
+        ui.painter().rect_stroke(card, 16.0, egui::Stroke::new(1.0, V_TAB_ON_EDGE), egui::StrokeKind::Inside);
+        if dim.clicked() {
+            if let Some(at) = dim.interact_pointer_pos() {
+                if !card.contains(at) {
+                    self.draft_open = false;
+                    return;
+                }
+            }
+        }
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink(18.0)));
+        child.set_clip_rect(card.shrink(18.0));
+        let ui = &mut child;
+        ui.horizontal(|ui| {
+            icon_label(ui, I_LAYERS, 20.0, V_GOLD);
+            ui.label(egui::RichText::new("New instance").font(title_font(22.0)).color(TEXT));
+        });
+        ui.label(egui::RichText::new("A separate world, options, and mods folder. The version files stay shared.").font(sub_font(13.0)).color(MUTED));
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Name").font(body_font(14.0)).color(TEXT));
+        field(ui, &mut self.draft_name, ui.available_width(), "Survival, creative, test…");
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Version").font(body_font(14.0)).color(TEXT));
+        let versions: Vec<String> = self.versions.iter().filter(|v| {
+            if v.channel == "release" { true } else { (self.snapshots && v.channel == "snapshot") || (self.previews && v.channel == "preview") }
+        }).map(|v| v.id.clone()).take(80).collect();
+        let picked = self.draft_version.clone();
+        egui::ScrollArea::vertical().id_salt("instance-versions").max_height(96.0).auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            if versions.is_empty() {
+                ui.label(egui::RichText::new("Loading versions…").font(sub_font(13.0)).color(MUTED));
+            }
+            for id in versions {
+                let on = id == picked;
+                if button(ui, &id, 120.0, 28.0, on) {
+                    self.draft_version = id;
+                }
+            }
+        });
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Loader").font(body_font(14.0)).color(TEXT));
+        ui.horizontal(|ui| {
+            for (id, label) in [("vanilla", "Vanilla"), ("forge", "Forge"), ("fabric", "Fabric"), ("neoforge", "NeoForge"), ("optifine", "OptiFine")] {
+                if button(ui, label, 78.0, 30.0, self.draft_loader == id) {
+                    self.draft_loader = id.into();
+                }
+            }
+        });
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if button(ui, "Cancel", 110.0, 36.0, false) {
+                self.draft_open = false;
+            }
+            if button(ui, "Create", 120.0, 36.0, true) {
+                let inst = crate::instances::create(&self.draft_name, &self.draft_version, &self.draft_loader);
+                let _ = std::fs::create_dir_all(crate::instances::dir(&self.app, &inst.id));
+                self.instance_id = inst.id.clone();
+                self.selected = inst.version.clone();
+                self.loader = inst.loader.clone();
+                self.instances.push(inst);
+                crate::instances::save(&self.app, &self.instances);
+                self.save_settings();
+                self.draft_open = false;
+            }
+        });
     }
 
     fn paint_loader_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
@@ -1208,6 +1338,7 @@ impl Desktop {
         }
         if let Some(id) = clicked {
             self.loader = id;
+            self.remember_instance();
             self.save_settings();
         }
 
@@ -1960,18 +2091,26 @@ fn lexend(size: f32) -> egui::FontId {
 
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("Outfit".into(), egui::FontData::from_static(include_bytes!("../assets/Outfit-700.ttf")).into());
-    fonts.font_data.insert("Manrope".into(), egui::FontData::from_static(include_bytes!("../assets/Manrope-600.ttf")).into());
-    fonts.font_data.insert("SourceSans".into(), egui::FontData::from_static(include_bytes!("../assets/SourceSans3-600.ttf")).into());
-    fonts.font_data.insert("Roboto".into(), egui::FontData::from_static(include_bytes!("../assets/Roboto-400.ttf")).into());
+    // Faces downloaded from hytale.com: Lexend and Nunito Sans, every weight the site declares.
+    fonts.font_data.insert("Lexend300".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-300.ttf")).into());
+    fonts.font_data.insert("Lexend400".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-400.ttf")).into());
+    fonts.font_data.insert("Lexend500".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-500.ttf")).into());
+    fonts.font_data.insert("Lexend600".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-600.ttf")).into());
+    fonts.font_data.insert("Lexend700".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-700.ttf")).into());
+    fonts.font_data.insert("Lexend800".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-800.ttf")).into());
+    fonts.font_data.insert("Nunito300".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-300.ttf")).into());
+    fonts.font_data.insert("Nunito400".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-400.ttf")).into());
+    fonts.font_data.insert("Nunito500".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-500.ttf")).into());
+    fonts.font_data.insert("Nunito600".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-600.ttf")).into());
+    fonts.font_data.insert("Nunito700".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-700.ttf")).into());
+    fonts.font_data.insert("Nunito800".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-800.ttf")).into());
     fonts.font_data.insert("Material".into(), egui::FontData::from_static(include_bytes!("../assets/MaterialSymbols.ttf")).into());
-    fonts.font_data.insert("Nunito".into(), egui::FontData::from_static(include_bytes!("../assets/NunitoSans-600.ttf")).into());
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "SourceSans".into());
-    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Roboto".into());
-    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Outfit".into(), "Nunito".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Manrope".into(), "Nunito".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["SourceSans".into(), "Nunito".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Roboto".into(), "Nunito".into()]);
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Nunito400".into());
+    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Nunito400".into());
+    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Lexend700".into(), "Nunito700".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Lexend600".into(), "Nunito600".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Nunito500".into(), "Lexend500".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Nunito300".into(), "Lexend300".into()]);
     fonts.families.insert(egui::FontFamily::Name("Icons".into()), vec!["Material".into()]);
     ctx.set_fonts(fonts);
 }
@@ -2255,9 +2394,7 @@ fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: boo
     let hit = ui.interact(rect, egui::Id::new("loader-install"), Sense::click());
     let top = if enabled { egui::Color32::from_rgb(98, 154, 236) } else { egui::Color32::from_rgb(48, 62, 84) };
     let bot = if enabled { egui::Color32::from_rgb(46, 91, 193) } else { egui::Color32::from_rgb(36, 48, 66) };
-    ui.painter().rect_filled(rect, 10.0, bot);
-    let cap = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.center().y + 6.0));
-    ui.painter().rect_filled(cap, 10.0, top);
+    paint_vgradient(ui.painter(), rect, 10.0, top, bot);
     let ink = if enabled { egui::Color32::WHITE } else { V_MUTED };
     if enabled {
         paint_material(ui.painter(), egui::pos2(rect.center().x - us_rect(rect, 54.0), rect.center().y), rect.height() * 0.42, I_DOWN, V_GOLD);
@@ -2267,6 +2404,58 @@ fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: boo
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
     hit.clicked() && enabled
+}
+
+fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("pill-action").with(label), Sense::click());
+    if primary {
+        paint_vgradient(ui.painter(), rect, 10.0, egui::Color32::from_rgb(98, 154, 236), egui::Color32::from_rgb(46, 91, 193));
+    } else {
+        ui.painter().rect_filled(rect, 10.0, V_TAB);
+        ui.painter().rect_stroke(rect, 10.0, egui::Stroke::new(1.0, V_TAB_EDGE), egui::StrokeKind::Inside);
+    }
+    paint_material(ui.painter(), egui::pos2(rect.left() + rect.height() * 0.42, rect.center().y), rect.height() * 0.38, I_ADD, egui::Color32::WHITE);
+    ui.painter().text(egui::pos2(rect.center().x + 8.0, rect.center().y), egui::Align2::CENTER_CENTER, label, title_font(rect.height() * 0.34), egui::Color32::WHITE);
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+/// Same two install colors, blended top to bottom instead of a hard split.
+fn paint_vgradient(painter: &egui::Painter, rect: egui::Rect, radius: f32, top: egui::Color32, bot: egui::Color32) {
+    let steps = 24;
+    for i in 0..steps {
+        let t0 = i as f32 / steps as f32;
+        let t1 = (i + 1) as f32 / steps as f32;
+        let y0 = rect.top() + rect.height() * t0;
+        let y1 = rect.top() + rect.height() * t1;
+        let mid = (t0 + t1) * 0.5;
+        let color = lerp_color(top, bot, mid);
+        let inset = rounded_inset(rect, radius, y0, y1);
+        let band = egui::Rect::from_min_max(egui::pos2(rect.left() + inset, y0), egui::pos2(rect.right() - inset, y1));
+        if band.width() > 0.5 {
+            painter.rect_filled(band, 0.0, color);
+        }
+    }
+}
+
+fn rounded_inset(rect: egui::Rect, radius: f32, y0: f32, y1: f32) -> f32 {
+    let y = (y0 + y1) * 0.5;
+    let from_top = y - rect.top();
+    let from_bot = rect.bottom() - y;
+    let d = from_top.min(from_bot);
+    if d >= radius || radius <= 0.0 {
+        return 0.0;
+    }
+    let dy = radius - d;
+    (radius - (radius * radius - dy * dy).max(0.0).sqrt()).max(0.0)
+}
+
+fn lerp_color(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    egui::Color32::from_rgba_unmultiplied(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()), mix(a.a(), b.a()))
 }
 
 fn us_rect(rect: egui::Rect, design: f32) -> f32 {

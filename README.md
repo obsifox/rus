@@ -43,7 +43,7 @@ These pictures are the Rus window itself, captured from the native program (`rus
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/versions.png" alt="Version tab with releases and the loader panel" width="100%"><p align="center"><sub><b>Version.</b> Releases, collection names, and the loader for that Minecraft version.</sub></p></td>
+<td width="50%" valign="top"><img src="docs/versions.png" alt="Instance tab with isolated copies and the loader panel" width="100%"><p align="center"><sub><b>Instance.</b> Several isolated copies of one version. New is an overlay, not a separate window.</sub></p></td>
 <td width="50%" valign="top"><img src="docs/settings.png" alt="Settings tab with username, memory, window size, snapshot toggle, Steve skin and the Rus cape" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, and a 3D skin preview. No Microsoft login.</sub></p></td>
 </tr>
 <tr>
@@ -53,9 +53,9 @@ These pictures are the Rus window itself, captured from the native program (`rus
 
 ## Why Rus
 
-- **A window, not a page.** Native [egui](https://github.com/emilk/egui), with the system title bar removed. Drag the sidebar or the wallpaper to move it. **Minimize** and **Exit** sit in the app.
+- **A window, not a page.** Native [egui](https://github.com/emilk/egui), with the system title bar removed. The window is a fixed 960×540. Exit sits in the app.
 - **Your account stays local.** Username, Steve or Alex, and the Rus cape. The offline UUID is the vanilla one (`OfflinePlayer:<name>`).
-- **The collection is in the launcher.** Each version shows the official wallpaper for its drop, fetched from [minecraft.net/collectibles](https://www.minecraft.net/en-us/collectibles) into your data folder. The art is not bundled.
+- **The collection is in the launcher.** Each version shows the official wallpaper for its drop, compressed inside the binary from [minecraft.net/collectibles](https://www.minecraft.net/en-us/collectibles). No download at runtime.
 - **Installs survive a dropped connection.** Downloads are 2 MB parts. A failed or corrupt part is fetched again. Finished parts stay.
 - **The client is sandboxed.** On Linux, bubblewrap gives the game its own mount, pid and hostname (`rus-sandbox`). Your home directory is not mounted. On Windows the client sits in a job object with a private profile under Rus.
 - **26.3 can start in Horizon.** The switch beside Play uses the unofficial [Horizon](https://github.com/ludovic111/horizon) client when you want it. Vanilla stays installed.
@@ -64,9 +64,9 @@ These pictures are the Rus window itself, captured from the native program (`rus
 
 | Area | What you get |
 |---|---|
-| **Window** | Home, Version, Mod, Settings, over the collection wallpaper. English. Material 3 roles: [Outfit](https://fonts.google.com/specimen/Outfit) for titles, [Manrope](https://fonts.google.com/specimen/Manrope) for tabs, [Source Sans 3](https://fonts.google.com/specimen/Source+Sans+3) for body text, [Roboto](https://fonts.google.com/specimen/Roboto) for captions. Icons are [Material Symbols](https://fonts.google.com/icons). |
+| **Window** | Home, Instance, Mod, Settings, over the collection wallpaper. English. Titles and tabs use Lexend; body and captions use Nunito Sans, the faces from hytale.com. Icons are [Material Symbols](https://fonts.google.com/icons). |
 | **Account** | Local only. Default skin Steve. Import a PNG skin or cape. One sample cape, Rus, in the real 64×32 layout. A CPU 3D preview, classic or slim. |
-| **Versions** | Releases always. Snapshots and previews from series 26 up, hidden until the Snapshot control or Settings turns them on. Each row shows the collection name and release date. |
+| **Instances** | Several isolated worlds of one version. New is an overlay on the window. Version files stay shared. The home card is not a button. Snapshots and previews from series 26 stay hidden until Settings turns them on. |
 | **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
 | **Play** | Vanilla Java client, or Horizon for 26.3. Both start outside the browser, inside the sandbox. |
 | **Loaders** | Vanilla is built in. Forge, Fabric and NeoForge show the official build for the selected version, then Install fetches it. OptiFine stays a preview when that version has no build. |
@@ -78,6 +78,7 @@ You need your own copy of Minecraft. Rus downloads it from Mojang into `~/.rus` 
 
 ```
 src/main.rs        native entry. no browser, no local page
+src/instances.rs   isolated instance folders
 src/desktop.rs     the window
 src/wallpapers.rs  collection art, cached under the data folder
 src/mojang.rs      version manifest
@@ -123,8 +124,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.6/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.6/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/v1.6.7/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/v1.6.7/rus-windows-x64.exe) |
 
 Linux:
 
@@ -139,4 +140,4 @@ Windows: run `rus-windows-x64.exe`. It opens the Rus window. It does not open a 
 
 MIT. See [LICENSE](LICENSE).
 
-Outfit, Manrope and Source Sans 3 are used under the SIL Open Font License. Roboto and Material Symbols are used under the Apache License 2.0. Collection wallpapers are compressed inside Rus. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
+Lexend and Nunito Sans are the faces used on hytale.com, under the SIL Open Font License. Material Symbols are used under the Apache License 2.0. Collection wallpapers are compressed inside Rus. Minecraft is a trademark of Mojang. Horizon is an unofficial project.
