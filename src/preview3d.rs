@@ -187,9 +187,10 @@ fn view_button(ui: &mut egui::Ui, label: &str) -> bool {
 }
 
 fn model_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    let mut b = egui::Button::new(label).min_size(egui::vec2(50.0, 24.0));
+    let text = egui::RichText::new(label).color(egui::Color32::from_rgb(220, 232, 235));
+    let mut b = egui::Button::new(text).min_size(egui::vec2(50.0, 24.0));
     if on {
-        b = b.fill(egui::Color32::from_rgb(0x3B, 0x82, 0xF6));
+        b = b.fill(egui::Color32::from_rgb(92, 74, 36));
     }
     ui.add(b).clicked()
 }
