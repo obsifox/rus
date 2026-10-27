@@ -766,6 +766,11 @@ impl eframe::App for Desktop {
             }
         }
         self.frames += 1;
+        // winit 0.30 puts WS_CAPTION back on an undecorated window. On some
+        // Windows machines the compositor still reserves that frame, so the
+        // picture is drawn ~26px down and the top of the window stays black.
+        #[cfg(windows)]
+        fit_windows_frame();
         if self.frames <= 24 && self.frames % 4 == 0 {
             round_client_corners();
         }
@@ -2781,6 +2786,84 @@ fn apply_round_corners() -> bool {
 }
 
 #[cfg(windows)]
+fn rus_hwnd() -> *mut std::os::raw::c_void {
+    use std::os::raw::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn FindWindowW(class: *const u16, window: *const u16) -> *mut c_void;
+    }
+    let name: Vec<u16> = "Rus\0".encode_utf16().collect();
+    unsafe { FindWindowW(std::ptr::null(), name.as_ptr()) }
+}
+
+/// Drop the caption winit leaves on a borderless window, then ask Windows to
+/// rebuild the frame so the picture starts at the top-left instead of under a
+/// black bar.
+#[cfg(windows)]
+fn fit_windows_frame() {
+    use std::os::raw::c_void;
+    const GWL_STYLE: i32 = -16;
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_CAPTION: isize = 0x00C0_0000;
+    const WS_THICKFRAME: isize = 0x0004_0000;
+    const WS_BORDER: isize = 0x0080_0000;
+    const WS_EX_WINDOWEDGE: isize = 0x0000_0100;
+    const WS_EX_CLIENTEDGE: isize = 0x0000_0200;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+    #[repr(C)]
+    struct Margins {
+        cx_left: i32,
+        cx_right: i32,
+        cy_top: i32,
+        cy_bottom: i32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, value: isize) -> isize;
+        fn SetWindowPos(hwnd: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    }
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmExtendFrameIntoClientArea(hwnd: *mut c_void, margins: *const Margins) -> i32;
+    }
+    let hwnd = rus_hwnd();
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let next = style & !(WS_CAPTION | WS_THICKFRAME | WS_BORDER);
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let next_ex = ex & !(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+        let changed = next != style || next_ex != ex;
+        if next != style {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, next);
+        }
+        if next_ex != ex {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next_ex);
+        }
+        if changed {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+        let margins = Margins { cx_left: -1, cx_right: -1, cy_top: -1, cy_bottom: -1 };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
+}
+
+#[cfg(windows)]
 fn apply_round_corners() -> bool {
     use std::os::raw::c_void;
     #[repr(C)]
@@ -2792,7 +2875,6 @@ fn apply_round_corners() -> bool {
     }
     #[link(name = "user32")]
     extern "system" {
-        fn FindWindowW(class: *const u16, window: *const u16) -> *mut c_void;
         fn GetWindowRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
         fn SetWindowRgn(hwnd: *mut c_void, rgn: *mut c_void, redraw: i32) -> i32;
     }
@@ -2800,12 +2882,12 @@ fn apply_round_corners() -> bool {
     extern "system" {
         fn CreateRoundRectRgn(x1: i32, y1: i32, x2: i32, y2: i32, w: i32, h: i32) -> *mut c_void;
     }
-    let name: Vec<u16> = "Rus\0".encode_utf16().collect();
+    fit_windows_frame();
+    let hwnd = rus_hwnd();
+    if hwnd.is_null() {
+        return false;
+    }
     unsafe {
-        let hwnd = FindWindowW(std::ptr::null(), name.as_ptr());
-        if hwnd.is_null() {
-            return false;
-        }
         let mut rect = Rect { left: 0, top: 0, right: 0, bottom: 0 };
         if GetWindowRect(hwnd, &mut rect) == 0 {
             return false;
