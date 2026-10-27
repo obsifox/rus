@@ -1052,7 +1052,8 @@ impl Desktop {
         let Some(tex) = &self.logo_title else { return };
         let card_top = uy(full, 640.0);
         let h = 104.0 * 0.98;
-        let aspect = 780.0 / 481.0;
+        let size = tex.size();
+        let aspect = size[0] as f32 / size[1] as f32;
         let w = h * aspect;
         let rect = egui::Rect::from_min_size(egui::pos2(20.0, card_top - 50.0 - h + 4.0), egui::vec2(w, h));
         ui.painter().image(
