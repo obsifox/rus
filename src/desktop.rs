@@ -808,14 +808,14 @@ impl Desktop {
 
     fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let tabs = [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings];
-        let h = us(full, 58.0);
-        let font = tab_font(us(full, 17.0));
-        let track = us(full, 2.6);
-        let pad = us(full, 30.0);
+        let h = us(full, 40.0);
+        let font = nav_font(us(full, 14.5));
+        let track = us(full, 0.7);
+        let pad = us(full, 16.0);
         let mut widths = Vec::with_capacity(tabs.len());
         for tab in tabs {
             if tab == Tab::Home {
-                widths.push(h * 1.22);
+                widths.push(h * 1.35);
             } else {
                 let label = tab.label().to_uppercase();
                 widths.push(tracked_width(ui.painter(), &label, font.clone(), track) + pad * 2.0);
@@ -835,15 +835,18 @@ impl Desktop {
             }
             let hit = ui.interact(rect, egui::Id::new("hynav").with(tab.label()), Sense::click());
             let on = self.tab == tab;
+            if on {
+                paint_active_fade(ui.painter(), rect);
+            }
             let color = if on {
-                egui::Color32::from_rgb(224, 186, 92)
+                egui::Color32::from_rgb(226, 186, 92)
             } else if hit.hovered() {
-                egui::Color32::WHITE
+                egui::Color32::from_rgb(255, 255, 255)
             } else {
-                egui::Color32::from_rgb(214, 222, 232)
+                egui::Color32::from_rgb(220, 232, 235)
             };
             if tab == Tab::Home {
-                paint_nav_house(ui.painter(), rect.center(), h * 0.46, color);
+                paint_nav_house(ui.painter(), rect.center(), h * 0.42, color);
             } else {
                 let label = tab.label().to_uppercase();
                 paint_tracked(
@@ -2136,6 +2139,10 @@ fn lexend(size: f32) -> egui::FontId {
     title_font(size)
 }
 
+fn nav_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("Nav".into()))
+}
+
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     // Faces downloaded from hytale.com: Lexend and Nunito Sans, every weight the site declares.
@@ -2156,6 +2163,8 @@ fn install_font(ctx: &egui::Context) {
     fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Nunito400".into());
     fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Lexend700".into(), "Nunito700".into()]);
     fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Lexend600".into(), "Nunito600".into()]);
+    // hytale.com #navigation-links is Lexend, and the header links are extra-bold.
+    fonts.families.insert(egui::FontFamily::Name("Nav".into()), vec!["Lexend800".into(), "Nunito800".into()]);
     fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Nunito500".into(), "Lexend500".into()]);
     fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Nunito300".into(), "Lexend300".into()]);
     fonts.families.insert(egui::FontFamily::Name("Icons".into()), vec!["Material".into()]);
@@ -2336,7 +2345,7 @@ fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     let plate = egui::Color32::from_rgb(186, 200, 216);
-    let s = 4.5;
+    let s = 3.4;
     for (cx, cy) in [
         (rect.left(), rect.top()),
         (rect.right(), rect.top()),
@@ -2352,18 +2361,38 @@ fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
     }
 }
 
+fn paint_active_fade(painter: &egui::Painter, rect: egui::Rect) {
+    let fade = painter.with_clip_rect(rect.shrink(0.5));
+    let center = rect.center();
+    let reach = (rect.height() * 1.2).max(rect.width() * 0.52);
+    let steps = 24;
+    for i in (0..steps).rev() {
+        let t = i as f32 / (steps as f32 - 1.0);
+        let k = (1.0 - t).powf(1.4);
+        let r = 37.0 + 82.0 * k;
+        let g = 53.0 + 100.0 * k;
+        let b = 86.0 + 106.0 * k;
+        fade.circle_filled(center, reach * (0.12 + 0.88 * t), egui::Color32::from_rgb(r as u8, g as u8, b as u8));
+    }
+}
+
 fn paint_nav_house(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let roof = vec![
-        c + egui::vec2(0.0, -s * 0.56),
-        c + egui::vec2(-s * 0.64, s * 0.04),
-        c + egui::vec2(s * 0.64, s * 0.04),
-    ];
-    painter.add(egui::Shape::convex_polygon(roof, color, egui::Stroke::NONE));
-    painter.rect_filled(
-        egui::Rect::from_min_max(c + egui::vec2(-s * 0.40, s * 0.0), c + egui::vec2(s * 0.40, s * 0.52)),
-        0.6,
-        color,
-    );
+    let stroke = egui::Stroke::new((s * 0.11).max(1.35), color);
+    let peak = c + egui::vec2(0.0, -s * 0.56);
+    let eave_l = c + egui::vec2(-s * 0.58, -s * 0.05);
+    let eave_r = c + egui::vec2(s * 0.58, -s * 0.05);
+    painter.line_segment([eave_l, peak], stroke);
+    painter.line_segment([peak, eave_r], stroke);
+    painter.line_segment([eave_l, eave_r], stroke);
+    let left = c + egui::vec2(-s * 0.38, -s * 0.02);
+    let right = c + egui::vec2(s * 0.38, -s * 0.02);
+    let foot_l = c + egui::vec2(-s * 0.38, s * 0.50);
+    let foot_r = c + egui::vec2(s * 0.38, s * 0.50);
+    painter.line_segment([left, foot_l], stroke);
+    painter.line_segment([right, foot_r], stroke);
+    let door = s * 0.15;
+    painter.line_segment([foot_l, c + egui::vec2(-door, s * 0.50)], stroke);
+    painter.line_segment([c + egui::vec2(door, s * 0.50), foot_r], stroke);
 }
 
 fn tracked_width(painter: &egui::Painter, text: &str, font: egui::FontId, tracking: f32) -> f32 {
