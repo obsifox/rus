@@ -765,7 +765,7 @@ impl Desktop {
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
-            let drag = egui::Rect::from_min_max(full.left_top(), egui::pos2(full.right(), uy(full, 18.0)));
+            let drag = egui::Rect::from_min_max(full.left_top(), egui::pos2(full.right(), uy(full, 12.0)));
             let drag_hit = ui.interact(drag, egui::Id::new("window-drag"), Sense::drag());
             if drag_hit.drag_started() {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
@@ -807,17 +807,64 @@ impl Desktop {
     }
 
     fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let tabs = [
-            (Tab::Home, 26.0, 112.0),
-            (Tab::Versions, 148.0, 168.0),
-            (Tab::Mods, 326.0, 108.0),
-            (Tab::Settings, 444.0, 150.0),
-        ];
-        for (tab, x, w) in tabs {
-            let rect = drect(full, x, 26.0, w, 54.0);
-            if pill_tab(ui, rect, tab, self.tab == tab) {
+        let tabs = [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings];
+        let h = us(full, 58.0);
+        let font = tab_font(us(full, 17.0));
+        let track = us(full, 2.6);
+        let pad = us(full, 30.0);
+        let mut widths = Vec::with_capacity(tabs.len());
+        for tab in tabs {
+            if tab == Tab::Home {
+                widths.push(h * 1.22);
+            } else {
+                let label = tab.label().to_uppercase();
+                widths.push(tracked_width(ui.painter(), &label, font.clone(), track) + pad * 2.0);
+            }
+        }
+        let total: f32 = widths.iter().sum();
+        let bar = egui::Rect::from_min_size(egui::pos2(ux(full, 22.0), uy(full, 16.0)), egui::vec2(total, h));
+        paint_hytale_bar(ui.painter(), bar);
+
+        let mut x = bar.left();
+        for (i, tab) in tabs.into_iter().enumerate() {
+            let rect = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(widths[i], h));
+            if i > 0 {
+                let top = rect.top() + h * 0.26;
+                let bot = rect.bottom() - h * 0.26;
+                ui.painter().vline(rect.left(), top..=bot, egui::Stroke::new(1.0, egui::Color32::from_rgb(132, 152, 176)));
+            }
+            let hit = ui.interact(rect, egui::Id::new("hynav").with(tab.label()), Sense::click());
+            let on = self.tab == tab;
+            let color = if on {
+                egui::Color32::from_rgb(224, 186, 92)
+            } else if hit.hovered() {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_rgb(214, 222, 232)
+            };
+            if tab == Tab::Home {
+                paint_nav_house(ui.painter(), rect.center(), h * 0.46, color);
+            } else {
+                let label = tab.label().to_uppercase();
+                paint_tracked(
+                    ui.painter(),
+                    rect.center() + egui::vec2(0.0, 1.0),
+                    egui::Align2::CENTER_CENTER,
+                    &label,
+                    font.clone(),
+                    egui::Color32::from_black_alpha(80),
+                    track,
+                );
+                paint_tracked(ui.painter(), rect.center(), egui::Align2::CENTER_CENTER, &label, font.clone(), color, track);
+            }
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if hit.clicked() {
                 self.tab = tab;
             }
+            hit.on_hover_text(tab.label());
+            x += widths[i];
         }
     }
 
@@ -2281,6 +2328,57 @@ fn icon_label(ui: &mut egui::Ui, icon: char, size: f32, color: egui::Color32) {
 fn panel_card(painter: &egui::Painter, rect: egui::Rect) {
     painter.rect_filled(rect, 12.0, V_PANEL);
     painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.0, V_BORDER), egui::StrokeKind::Inside);
+}
+
+fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
+    let fill = egui::Color32::from_rgb(37, 53, 86);
+    let edge = egui::Color32::from_rgb(158, 176, 198);
+    painter.rect_filled(rect, 1.5, fill);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    let plate = egui::Color32::from_rgb(186, 200, 216);
+    let s = 4.5;
+    for (cx, cy) in [
+        (rect.left(), rect.top()),
+        (rect.right(), rect.top()),
+        (rect.left(), rect.bottom()),
+        (rect.right(), rect.bottom()),
+    ] {
+        painter.rect_stroke(
+            egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(s, s)),
+            0.0,
+            egui::Stroke::new(1.15, plate),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+fn paint_nav_house(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let roof = vec![
+        c + egui::vec2(0.0, -s * 0.56),
+        c + egui::vec2(-s * 0.64, s * 0.04),
+        c + egui::vec2(s * 0.64, s * 0.04),
+    ];
+    painter.add(egui::Shape::convex_polygon(roof, color, egui::Stroke::NONE));
+    painter.rect_filled(
+        egui::Rect::from_min_max(c + egui::vec2(-s * 0.40, s * 0.0), c + egui::vec2(s * 0.40, s * 0.52)),
+        0.6,
+        color,
+    );
+}
+
+fn tracked_width(painter: &egui::Painter, text: &str, font: egui::FontId, tracking: f32) -> f32 {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return 0.0;
+    }
+    let mut total = 0.0;
+    for ch in &chars {
+        total += painter.layout_no_wrap(ch.to_string(), font.clone(), egui::Color32::WHITE).size().x;
+    }
+    if chars.len() > 1 {
+        total += tracking * (chars.len() - 1) as f32;
+    }
+    total
 }
 
 fn pill_tab(ui: &mut egui::Ui, rect: egui::Rect, tab: Tab, on: bool) -> bool {
