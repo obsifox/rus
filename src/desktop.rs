@@ -732,6 +732,9 @@ impl eframe::App for Desktop {
             }
         }
         self.frames += 1;
+        if self.frames <= 24 && self.frames % 4 == 0 {
+            round_client_corners();
+        }
         let paper_ready = self.papers.contains_key(self.paper_for(&self.selected).title);
         let versions_ready = !self.versions.is_empty() || self.frames > 40;
         let loaders_ready = self.loaders.ready && self.loaders.fabric.iter().any(|(k, v)| k == &self.selected && !v.is_empty());
@@ -910,9 +913,16 @@ impl Desktop {
         self.paint_recent_servers(ui, full);
 
         self.paint_player_card(ui, full);
-        self.paint_instance_card(ui, full);
 
-        let play = egui::Rect::from_min_size(egui::pos2(ux(full, 1004.0), uy(full, 640.0)), egui::vec2(us(full, 248.0), us(full, 52.0)));
+        let version_card = self.paint_instance_card(ui, full);
+        paint_faded_bar(ui.painter(), version_card.right() + 16.0, version_card.top() + 8.0, version_card.height() - 16.0);
+
+        let play_h = us(full, 52.0);
+        let play_w = 112.0;
+        let play = egui::Rect::from_min_size(
+            egui::pos2(full.right() - 22.0 - play_w, uy(full, 640.0)),
+            egui::vec2(play_w, play_h),
+        );
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
         let label = if live { "STOP" } else { "PLAY" };
         let note = if let Some((_, line)) = self.job_line() {
@@ -937,7 +947,7 @@ impl Desktop {
             }
             ui.painter().text(href.center(), egui::Align2::CENTER_CENTER, "HORIZON", nav_font(us(full, 12.0)), egui::Color32::from_rgb(220, 232, 235));
         }
-        if play_button(ui, play, label) {
+        if play_button(ui, play, label, live) {
             self.join = None;
             self.play();
         }
@@ -960,10 +970,10 @@ impl Desktop {
     }
 
     fn paint_player_card(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        // Top-right of the window, under the exit mark. Only the head.
-        let side = us(full, 40.0).round().max(28.0);
+        // 12px from the right, 30px from the top, smaller than the last head.
+        let side = 22.0;
         let head = egui::Rect::from_min_size(
-            egui::pos2(ux(full, 1218.0).round(), uy(full, 65.0).round()),
+            egui::pos2((full.right() - 12.0 - side).round(), (full.top() + 30.0).round()),
             egui::vec2(side, side),
         );
         let name = if self.username.is_empty() { "Player" } else { self.username.as_str() };
@@ -993,20 +1003,23 @@ impl Desktop {
         }
     }
 
-    /// Version and play time. Display only — not a control.
-    fn paint_instance_card(&self, ui: &mut egui::Ui, full: egui::Rect) {
-        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 640.0)), egui::vec2(us(full, 692.0), us(full, 52.0)));
+    /// Version only, sized to that text. Display only — not a control.
+    fn paint_instance_card(&self, ui: &mut egui::Ui, full: egui::Rect) -> egui::Rect {
+        let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+        let font = title_font(us(full, 15.0));
+        let text_w = ui.painter().layout_no_wrap(version.clone(), font.clone(), TEXT).size().x;
+        let h = us(full, 52.0);
+        let icon = us(full, 28.0);
+        let pad = 12.0;
+        let w = pad + icon + 8.0 + text_w + pad;
+        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 640.0)), egui::vec2(w, h));
         paint_hytale_bar(ui.painter(), card);
-        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + us(full, 34.0), card.center().y), egui::vec2(us(full, 36.0), us(full, 36.0)));
-        if let Some(icon) = self.loader_icon() {
-            ui.painter().image(icon.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + pad + icon * 0.5, card.center().y), egui::vec2(icon, icon));
+        if let Some(tex) = self.loader_icon() {
+            ui.painter().image(tex.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        let name = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| self.selected.clone());
-        let detail = format!("{} · {}", crate::state::loader_label(&self.loader), self.selected);
-        ui.painter().text(egui::pos2(card.left() + us(full, 62.0), card.center().y - us(full, 9.0)), egui::Align2::LEFT_CENTER, &name, title_font(us(full, 15.0)), TEXT);
-        ui.painter().text(egui::pos2(card.left() + us(full, 62.0), card.center().y + us(full, 10.0)), egui::Align2::LEFT_CENTER, &detail, body_font(us(full, 13.0)), MUTED);
-        paint_clock(ui.painter(), egui::pos2(card.right() - us(full, 118.0), card.center().y), GOLD);
-        paint_play_stat(ui, egui::pos2(card.right() - us(full, 100.0), card.center().y), self.shown_play_ms(), us(full, 15.0));
+        ui.painter().text(egui::pos2(icon_rect.right() + 8.0, card.center().y), egui::Align2::LEFT_CENTER, &version, font, TEXT);
+        card
     }
 
     fn account_bar(&mut self, ui: &mut egui::Ui, origin: egui::Pos2, h: f32) {
@@ -1198,10 +1211,12 @@ impl Desktop {
     }
 
     fn paint_exit(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        // Same corner as the reference: above and to the right of the profile head.
-        let center = egui::pos2(ux(full, 1263.0), uy(full, 41.0));
-        let size = us(full, 12.0).max(8.0);
-        let exit = egui::Rect::from_center_size(center, egui::vec2(us(full, 18.0), us(full, 18.0)));
+        // 3px clear of the 4px rounded corner, on both axes.
+        let h = 4.0;
+        let corner = egui::pos2(full.right() - 4.0 - 3.0, full.top() + 4.0 + 3.0);
+        let center = corner + egui::vec2(-h, h);
+        let size = h * 2.0;
+        let exit = egui::Rect::from_center_size(center, egui::vec2(16.0, 16.0));
         let hit = ui.interact(exit, egui::Id::new("exit-version"), Sense::click());
         paint_empty_cross(ui.painter(), center, size, empty_gold(hit.hovered()));
         if hit.hovered() {
@@ -1784,18 +1799,31 @@ fn icon_button(ui: &mut egui::Ui, rect: egui::Rect, id: &str, on: bool, tip: &st
     clicked
 }
 
-fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
+fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("play"), Sense::click());
-    paint_hytale_bar(ui.painter(), rect);
-    paint_active_fade(ui.painter(), rect);
-    let tri = egui::pos2(rect.left() + rect.width() * 0.22, rect.center().y);
-    let s = rect.height() * 0.16;
-    let ink = egui::Color32::from_rgb(220, 232, 235);
-    let stroke = egui::Stroke::new(1.4, ink);
-    ui.painter().line_segment([tri + egui::vec2(-s * 0.45, -s), tri + egui::vec2(s * 0.7, 0.0)], stroke);
-    ui.painter().line_segment([tri + egui::vec2(s * 0.7, 0.0), tri + egui::vec2(-s * 0.45, s)], stroke);
-    ui.painter().line_segment([tri + egui::vec2(-s * 0.45, s), tri + egui::vec2(-s * 0.45, -s)], stroke);
-    ui.painter().text(egui::pos2(rect.left() + rect.width() * 0.62, rect.center().y), egui::Align2::CENTER_CENTER, label, nav_font(rect.height() * 0.30), ink);
+    let ink = egui::Color32::from_rgb(255, 244, 242);
+    if stop {
+        let fill = if hit.hovered() {
+            egui::Color32::from_rgb(214, 92, 98)
+        } else {
+            egui::Color32::from_rgb(196, 74, 82)
+        };
+        ui.painter().rect_filled(rect, 2.0, fill);
+        ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(232, 156, 156)), egui::StrokeKind::Inside);
+        let s = rect.height() * 0.13;
+        let box_r = egui::Rect::from_center_size(egui::pos2(rect.left() + rect.width() * 0.28, rect.center().y), egui::vec2(s * 1.7, s * 1.7));
+        ui.painter().rect_filled(box_r, 1.0, ink);
+    } else {
+        paint_hytale_bar(ui.painter(), rect);
+        let tri = egui::pos2(rect.left() + rect.width() * 0.28, rect.center().y);
+        let s = rect.height() * 0.16;
+        let stroke = egui::Stroke::new(1.35, egui::Color32::from_rgb(220, 232, 235));
+        ui.painter().line_segment([tri + egui::vec2(-s * 0.45, -s), tri + egui::vec2(s * 0.7, 0.0)], stroke);
+        ui.painter().line_segment([tri + egui::vec2(s * 0.7, 0.0), tri + egui::vec2(-s * 0.45, s)], stroke);
+        ui.painter().line_segment([tri + egui::vec2(-s * 0.45, s), tri + egui::vec2(-s * 0.45, -s)], stroke);
+    }
+    let text_color = if stop { ink } else { egui::Color32::from_rgb(220, 232, 235) };
+    ui.painter().text(egui::pos2(rect.left() + rect.width() * 0.62, rect.center().y), egui::Align2::CENTER_CENTER, label, nav_font(rect.height() * 0.32), text_color);
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
@@ -2081,7 +2109,29 @@ fn paint_fade(ui: &egui::Ui, rect: egui::Rect) {
 fn paint_frame(ctx: &egui::Context) {
     let rect = ctx.screen_rect();
     ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("frame")))
-        .rect_stroke(rect, 0.0, egui::Stroke::new(2.0, BORDER_BTN), egui::StrokeKind::Inside);
+        .rect_stroke(rect.shrink(0.5), 4.0, egui::Stroke::new(1.25, BORDER_BTN), egui::StrokeKind::Inside);
+}
+
+fn paint_faded_bar(painter: &egui::Painter, x: f32, y: f32, h: f32) {
+    let steps = h.ceil().max(8.0) as i32;
+    for i in 0..steps {
+        let t = (i as f32 + 0.5) / steps as f32;
+        let k = (1.0 - (t - 0.5).abs() * 2.0).powf(1.25);
+        let alpha = (k * 188.0) as u8;
+        let y0 = y + h * (i as f32 / steps as f32);
+        let y1 = y + h * ((i + 1) as f32 / steps as f32);
+        let soft = (alpha as f32 * 0.38) as u8;
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x - 2.0, y0), egui::pos2(x + 2.0, y1)),
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(176, 196, 214, soft),
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x - 0.65, y0), egui::pos2(x + 0.65, y1)),
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(186, 204, 220, alpha),
+        );
+    }
 }
 
 fn window_edges(ctx: &egui::Context) {
@@ -2300,9 +2350,241 @@ fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::T
 }
 
 fn save_png(path: &str, image: &egui::ColorImage) -> Result<(), String> {
-    let img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, image.as_raw().to_vec()).ok_or("bad image")?;
+    let mut img = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, image.as_raw().to_vec()).ok_or("bad image")?;
     if let Some(parent) = std::path::Path::new(path).parent() { let _ = std::fs::create_dir_all(parent); }
+    punch_round_corners(&mut img, 4);
     img.save(path).map_err(|e| e.to_string())
+}
+
+fn round_client_corners() {
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DONE.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    if apply_round_corners() {
+        DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_round_corners() -> bool {
+    use std::ffi::CStr;
+    use std::os::raw::{c_char, c_int, c_uint, c_ulong, c_void};
+
+    #[repr(C)]
+    struct XRectangle {
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+    }
+
+    #[link(name = "X11")]
+    extern "C" {
+        fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+        fn XDefaultRootWindow(dpy: *mut c_void) -> c_ulong;
+        fn XQueryTree(
+            dpy: *mut c_void,
+            w: c_ulong,
+            root: *mut c_ulong,
+            parent: *mut c_ulong,
+            children: *mut *mut c_ulong,
+            nchildren: *mut c_uint,
+        ) -> c_int;
+        fn XFetchName(dpy: *mut c_void, w: c_ulong, name: *mut *mut c_char) -> c_int;
+        fn XFree(data: *mut c_void) -> c_int;
+        fn XCloseDisplay(dpy: *mut c_void) -> c_int;
+        fn XGetGeometry(
+            dpy: *mut c_void,
+            w: c_ulong,
+            root: *mut c_ulong,
+            x: *mut c_int,
+            y: *mut c_int,
+            width: *mut c_uint,
+            height: *mut c_uint,
+            border: *mut c_uint,
+            depth: *mut c_uint,
+        ) -> c_int;
+    }
+    #[link(name = "Xext")]
+    extern "C" {
+        fn XShapeCombineRectangles(
+            dpy: *mut c_void,
+            dest: c_ulong,
+            dest_kind: c_int,
+            x_off: c_int,
+            y_off: c_int,
+            rects: *const XRect,
+            n: c_int,
+            op: c_int,
+            ordering: c_int,
+        );
+    }
+
+    unsafe fn named(dpy: *mut c_void, win: c_ulong, want: &str) -> bool {
+        let mut raw = std::ptr::null_mut();
+        if XFetchName(dpy, win, &mut raw) == 0 || raw.is_null() {
+            return false;
+        }
+        let ok = CStr::from_ptr(raw).to_str().ok() == Some(want);
+        XFree(raw as *mut c_void);
+        ok
+    }
+
+    unsafe fn find(dpy: *mut c_void, win: c_ulong) -> Option<c_ulong> {
+        if named(dpy, win, "Rus") {
+            return Some(win);
+        }
+        let mut root = 0;
+        let mut parent = 0;
+        let mut children = std::ptr::null_mut();
+        let mut n = 0;
+        if XQueryTree(dpy, win, &mut root, &mut parent, &mut children, &mut n) == 0 {
+            return None;
+        }
+        let mut found = None;
+        for i in 0..n as isize {
+            if let Some(hit) = find(dpy, *children.offset(i)) {
+                found = Some(hit);
+                break;
+            }
+        }
+        if !children.is_null() {
+            XFree(children as *mut c_void);
+        }
+        found
+    }
+
+    unsafe {
+        let dpy = XOpenDisplay(std::ptr::null());
+        if dpy.is_null() {
+            return false;
+        }
+        let root = XDefaultRootWindow(dpy);
+        let Some(win) = find(dpy, root) else {
+            XCloseDisplay(dpy);
+            return false;
+        };
+        let mut root_ret = 0;
+        let mut x = 0;
+        let mut y = 0;
+        let mut width = 0u32;
+        let mut height = 0u32;
+        let mut border = 0u32;
+        let mut depth = 0u32;
+        if XGetGeometry(dpy, win, &mut root_ret, &mut x, &mut y, &mut width, &mut height, &mut border, &mut depth) == 0 {
+            XCloseDisplay(dpy);
+            return false;
+        }
+        let rects = corner_cut_rects(width as i32, height as i32, 4);
+        if !rects.is_empty() {
+            XShapeCombineRectangles(dpy, win, 0, 0, 0, rects.as_ptr(), rects.len() as c_int, 3, 0);
+        }
+        XCloseDisplay(dpy);
+        true
+    }
+}
+
+#[cfg(windows)]
+fn apply_round_corners() -> bool {
+    use std::os::raw::c_void;
+    #[repr(C)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn FindWindowW(class: *const u16, window: *const u16) -> *mut c_void;
+        fn GetWindowRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
+        fn SetWindowRgn(hwnd: *mut c_void, rgn: *mut c_void, redraw: i32) -> i32;
+    }
+    #[link(name = "gdi32")]
+    extern "system" {
+        fn CreateRoundRectRgn(x1: i32, y1: i32, x2: i32, y2: i32, w: i32, h: i32) -> *mut c_void;
+    }
+    let name: Vec<u16> = "Rus\0".encode_utf16().collect();
+    unsafe {
+        let hwnd = FindWindowW(std::ptr::null(), name.as_ptr());
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut rect = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetWindowRect(hwnd, &mut rect) == 0 {
+            return false;
+        }
+        let w = rect.right - rect.left;
+        let h = rect.bottom - rect.top;
+        let rgn = CreateRoundRectRgn(0, 0, w, h, 8, 8);
+        if rgn.is_null() {
+            return false;
+        }
+        SetWindowRgn(hwnd, rgn, 1);
+        true
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn apply_round_corners() -> bool {
+    true
+}
+
+#[cfg(target_os = "linux")]
+fn corner_cut_rects(width: i32, height: i32, radius: i32) -> Vec<XRect> {
+    let mut out = Vec::new();
+    let r = radius as f32;
+    for y in 0..radius {
+        for x in 0..radius {
+            let cx = x as f32 + 0.5;
+            let cy = y as f32 + 0.5;
+            if (cx - r).powi(2) + (cy - r).powi(2) <= r * r {
+                continue;
+            }
+            for (px, py) in [
+                (x, y),
+                (width - 1 - x, y),
+                (x, height - 1 - y),
+                (width - 1 - x, height - 1 - y),
+            ] {
+                out.push(XRect { x: px as i16, y: py as i16, width: 1, height: 1 });
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct XRect {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+}
+
+fn punch_round_corners(img: &mut image::RgbaImage, radius: i32) {
+    let (w, h) = img.dimensions();
+    let r = radius as f32;
+    for y in 0..radius {
+        for x in 0..radius {
+            let cx = x as f32 + 0.5;
+            let cy = y as f32 + 0.5;
+            if (cx - r).powi(2) + (cy - r).powi(2) <= r * r {
+                continue;
+            }
+            let corners = [
+                (x as u32, y as u32),
+                (w - 1 - x as u32, y as u32),
+                (x as u32, h - 1 - y as u32),
+                (w - 1 - x as u32, h - 1 - y as u32),
+            ];
+            for (px, py) in corners {
+                img.put_pixel(px, py, image::Rgba([0, 0, 0, 0]));
+            }
+        }
+    }
 }
 
 fn version_hit(id: &str, prefix: &str) -> bool {
