@@ -12,6 +12,7 @@ use sha2::Sha256;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -66,6 +67,64 @@ pub fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
 pub fn get_json(url: &str) -> Result<serde_json::Value, String> {
     let bytes = get_bytes(url)?;
     serde_json::from_slice(&bytes).map_err(|e| format!("{url}: JSON {e}"))
+}
+
+/// Stream `url` to `dest`, reporting 0..1 as bytes arrive. `cancel` stops the
+/// next chunk and deletes the partial file. Completed parts of a version
+/// install still use `download`; this path is the visible Explore bar.
+pub fn copy_url(url: &str, dest: &Path, cancel: &AtomicBool, mut on: impl FnMut(f32)) -> Result<u64, String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("canceled".into());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let leaf = dest.file_name().and_then(|s| s.to_str()).unwrap_or("download");
+    let tmp = dest.with_file_name(format!(".{leaf}.part"));
+    let (_, resp) = call(url, None)?;
+    let total = resp
+        .header("Content-Length")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut file = File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut reader = resp.into_reader();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut got = 0u64;
+    let result = (|| -> Result<(), String> {
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("canceled".into());
+            }
+            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            got += n as u64;
+            if total > 0 {
+                on((got as f32 / total as f32).clamp(0.0, 0.99));
+            } else if got > 0 {
+                on((got as f32 / (got as f32 + 512.0 * 1024.0)).min(0.95));
+            }
+        }
+        file.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    drop(file);
+    if let Err(e) = result {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if got == 0 {
+        let _ = fs::remove_file(&tmp);
+        return Err("empty download".into());
+    }
+    if let Err(e) = fs::rename(&tmp, dest) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    on(1.0);
+    Ok(got)
 }
 
 pub fn sha1_hex(bytes: &[u8]) -> String {

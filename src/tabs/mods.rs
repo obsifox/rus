@@ -408,11 +408,12 @@ impl super::super::Desktop {
             self.explore_open = None;
             return;
         }
-        let label = if self.explore_installing { "Installing…" } else { "Install" };
-        if can_install && spec_button(ui, install, label, true) {
+        if self.explore_installing {
+            paint_download_bar(ui.painter(), install, self.explore_progress);
+        } else if can_install && spec_button(ui, install, "Install", true) {
             self.install_open_explore();
         } else if !can_install {
-            spec_button(ui, install, label, false);
+            spec_button(ui, install, "Install", false);
         }
         if let Some(id) = toggle {
             if let Some(i) = self.explore_optional.iter().position(|x| x == &id) {
@@ -589,14 +590,57 @@ impl super::super::Desktop {
         if self.explore_installing || detail.file_url.is_empty() {
             return;
         }
-        self.explore_installing = true;
+        if self.job_state().as_deref() == Some("running") {
+            self.notice = "A download is already running".into();
+            return;
+        }
         let optional = self.explore_optional.clone();
         let dest = self.pack_dir(self.pack_folder());
         let with_deps = self.pack_tab == 1;
         let as_pack = self.pack_tab == 0;
         let tx = self.tx.clone();
+        self.download_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        let cancel = self.download_cancel.clone();
+        if as_pack {
+            self.explore_open = None;
+            let job = self.track_job(&detail.title);
+            std::thread::spawn(move || {
+                let job_prog = job.clone();
+                let outcome = crate::explore::install(&detail, &optional, &dest, with_deps, as_pack, &cancel, |frac| {
+                    if let Ok(mut j) = job_prog.lock() {
+                        if !j.canceled() {
+                            j.progress = frac as f64;
+                        }
+                    }
+                });
+                let stopped = cancel.load(std::sync::atomic::Ordering::Relaxed) || outcome.note == "Download stopped";
+                if let Ok(mut j) = job.lock() {
+                    if stopped || j.canceled() {
+                        j.state = "canceled".into();
+                        j.message = "Download stopped".into();
+                    } else {
+                        j.state = "done".into();
+                        j.progress = 1.0;
+                        j.message = "Download complete".into();
+                    }
+                }
+                if !stopped {
+                    let _ = tx.send(Msg::ExploreDone(outcome));
+                }
+            });
+            return;
+        }
+        self.explore_installing = true;
+        self.explore_progress = 0.0;
         std::thread::spawn(move || {
-            let outcome = crate::explore::install(&detail, &optional, &dest, with_deps, as_pack);
+            let tx_prog = tx.clone();
+            let mut last = -1.0f32;
+            let outcome = crate::explore::install(&detail, &optional, &dest, with_deps, as_pack, &cancel, |frac| {
+                if frac - last >= 0.01 || frac >= 1.0 {
+                    last = frac;
+                    let _ = tx_prog.send(Msg::ExploreProgress(frac));
+                }
+            });
             let _ = tx.send(Msg::ExploreDone(outcome));
         });
     }

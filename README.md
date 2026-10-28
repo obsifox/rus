@@ -70,7 +70,7 @@ These pictures are the Rus window itself, captured from the native program (`rus
 | **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
 | **Play** | Vanilla Java client, or Horizon for 26.3. Both start outside the browser, inside the sandbox. |
 | **Loaders** | Vanilla is built in. Forge, Fabric and NeoForge show the official build for every version that feed supports, then Install fetches it. OptiFine stays a preview when that version has no build. |
-| **Mods** | Installed files, or Explore on Modrinth. Categories are modpack, mods, resource packs, and shader packs. Explore filters by version and by Forge, Fabric, or NeoForge. A project opens with its name, picture, and description. Install includes required mods, and optional mods you choose. |
+| **Mods** | Installed files, or Explore on Modrinth. Categories are modpack, mods, resource packs, and shader packs. Explore filters by version and by Forge, Fabric, or NeoForge. A project opens with its name, picture, and description. Install includes required mods, and optional mods you choose. A version or modpack install returns to Home: a bar fills, and Play turns red STOP. A mod, resource pack, or shader stays on the page, and that Install button becomes the download bar. |
 
 You need your own copy of Minecraft. Rus downloads it from Mojang into `~/.rus` on Linux, or `%APPDATA%\Rus` on Windows.
 
@@ -127,7 +127,7 @@ The release is Rus Gate. Download it once.
 
 | Platform | File |
 | --- | --- |
-| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.02/rus-gate.exe) |
+| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.03/rus-gate.exe) |
 
 <p align="center">
   <img src="docs/gate.png" alt="Rus Gate, a solid-color install window" width="640">
@@ -137,7 +137,7 @@ Run `rus-gate.exe`. The window is one solid color, with no title bar. It asks wh
 
 `Rus Launcher.exe` does not show the install step. With a connection it reads **tags**, not the release list, downloads `rus_{version}.exe` from that tag's release, and starts it. With no connection it starts the installed build.
 
-Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.02`.
+Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.03`.
 
 Linux builds from source with `cargo build --release`. The published release is the Windows gate.
 

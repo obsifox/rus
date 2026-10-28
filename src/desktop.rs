@@ -8,6 +8,7 @@ use eframe::egui::{self, CursorIcon, ResizeDirection, RichText, Sense, ViewportC
 use image::RgbaImage;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -106,6 +107,7 @@ enum Msg {
     ExploreDetailErr(u64, String),
     ExploreIcon { id: String, bytes: Vec<u8> },
     ExploreDone(crate::explore::Outcome),
+    ExploreProgress(f32),
 }
 
 struct Desktop {
@@ -186,6 +188,8 @@ struct Desktop {
     explore_ver_open: bool,
     explore_ver_skip: bool,
     explore_installing: bool,
+    explore_progress: f32,
+    download_cancel: Arc<AtomicBool>,
     explore_dirty: bool,
     row_focus: usize,
     confirm_remove: Option<String>,
@@ -311,6 +315,8 @@ impl Desktop {
             explore_ver_open: false,
             explore_ver_skip: false,
             explore_installing: false,
+            explore_progress: 0.0,
+            download_cancel: Arc::new(AtomicBool::new(false)),
             explore_dirty: false,
             row_focus: 0,
             confirm_remove: None,
@@ -430,6 +436,11 @@ impl Desktop {
                     }
                 }
                 Msg::ExploreDone(outcome) => self.on_explore_done(outcome),
+                Msg::ExploreProgress(p) => {
+                    if self.explore_installing {
+                        self.explore_progress = p.clamp(0.0, 1.0);
+                    }
+                }
                 Msg::Paper { title, bytes } => {
                     if let Some(tex) = load_texture(ctx, &title, &bytes) {
                         self.papers.insert(title, tex);
@@ -444,7 +455,7 @@ impl Desktop {
                 if state == "done" && self.app.is_installed(&self.selected) {
                     self.play_after = false;
                     self.launch_selected();
-                } else if state == "error" {
+                } else if state == "error" || state == "canceled" {
                     self.play_after = false;
                 }
             }
@@ -454,7 +465,7 @@ impl Desktop {
                 if state == "done" && self.app.is_installed(&self.selected) {
                     self.loader_after = false;
                     self.spawn_loader_install();
-                } else if state == "error" {
+                } else if state == "error" || state == "canceled" {
                     self.loader_after = false;
                 }
             }
@@ -823,9 +834,45 @@ impl Desktop {
         self.app.jobs.lock().unwrap().insert(id.clone(), job.clone());
         *self.app.last_job.lock().unwrap() = Some(id.clone());
         self.job_id = Some(id);
+        self.tab = Tab::Home;
         let app = self.app.clone();
         std::thread::spawn(move || crate::install::run(app, job));
         self.notice = format!("Installing {version}");
+    }
+
+    fn job_message(&self) -> Option<String> {
+        let id = self.job_id.as_ref()?;
+        let job = self.app.job(id)?;
+        let j = job.lock().ok()?;
+        Some(j.message.clone())
+    }
+
+    fn cancel_install(&mut self) {
+        self.download_cancel.store(true, Ordering::Relaxed);
+        if let Some(id) = &self.job_id {
+            if let Some(job) = self.app.job(id) {
+                if let Ok(mut j) = job.lock() {
+                    j.cancel.store(true, Ordering::Relaxed);
+                    if j.state == "running" {
+                        j.message = "Stopping…".into();
+                    }
+                }
+            }
+        }
+        self.notice = "Stopping…".into();
+    }
+
+    fn track_job(&mut self, label: &str) -> Arc<Mutex<Job>> {
+        let id = format!("job-{}", now_ms());
+        let job = Arc::new(Mutex::new(Job::new(id.clone(), label.to_string(), Vec::new())));
+        if let Ok(mut j) = job.lock() {
+            j.message = format!("Downloading {label}");
+        }
+        self.app.jobs.lock().unwrap().insert(id.clone(), job.clone());
+        *self.app.last_job.lock().unwrap() = Some(id.clone());
+        self.job_id = Some(id);
+        self.tab = Tab::Home;
+        job
     }
 
     fn job_line(&self) -> Option<(f32, String)> {
@@ -1493,6 +1540,21 @@ fn icon_button(ui: &mut egui::Ui, rect: egui::Rect, id: &str, on: bool, tip: &st
     let clicked = hit.clicked();
     hit.on_hover_text(tip);
     clicked
+}
+
+pub(crate) fn paint_download_bar(painter: &egui::Painter, rect: egui::Rect, frac: f32) {
+    let frac = frac.clamp(0.0, 1.0);
+    painter.rect_filled(rect, 1.5, HY_HIGH);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
+    let w = (rect.width() * frac).min(rect.width());
+    if w > 0.5 {
+        painter.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(w, rect.height())), 1.5, HY_ACCENT);
+    }
+    if rect.height() >= 16.0 {
+        let pct = format!("{}%", (frac * 100.0).round() as u32);
+        let ink = if frac > 0.45 { HY_BG } else { HY_TEXT };
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, pct, nav_font(rect.height() * 0.42), ink);
+    }
 }
 
 fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool, horizon: bool) -> bool {

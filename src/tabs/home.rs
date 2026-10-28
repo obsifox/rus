@@ -33,34 +33,47 @@ impl super::super::Desktop {
             egui::vec2(play_w, play_h),
         );
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
-        let label = if live { "STOP" } else { "PLAY" };
-        let note = if let Some((_, line)) = self.job_line() {
+        let installing = self.job_state().as_deref() == Some("running");
+        let stop = live || installing;
+        let label = if stop { "STOP" } else { "PLAY" };
+        let note = if installing {
+            self.job_message().filter(|s| !s.is_empty()).unwrap_or_else(|| "Downloading…".into())
+        } else if let Some((_, line)) = self.job_line() {
             line
         } else if self.notice != "Ready" && !self.notice.is_empty() {
             self.notice.clone()
         } else {
             format!("Patch {}", crate::product::VERSION)
         };
+        let note = if note.chars().count() > 48 {
+            format!("{}…", note.chars().take(47).collect::<String>())
+        } else {
+            note
+        };
         let note_font = lexend(us(full, 14.0));
         let note_w = ui.painter().layout_no_wrap(note.clone(), note_font.clone(), GOLD).size().x;
-        let note_y = play.top() - 16.0;
+        let note_y = if installing { play.top() - 36.0 } else { play.top() - 16.0 };
         paint_diamond(ui.painter(), egui::pos2(play.right() - note_w - 14.0, note_y), GOLD);
         ui.painter().text(egui::pos2(play.right() - 2.0, note_y), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
+        if installing {
+            let progress = self.job_line().map(|(p, _)| p).unwrap_or(0.0);
+            let track = egui::Rect::from_min_size(egui::pos2(play.right() - 220.0, play.top() - 22.0), egui::vec2(220.0, 10.0));
+            paint_download_bar(ui.painter(), track, progress);
+        }
         let horizon_here = self.selected.starts_with("26.3");
         if horizon_here && self.paint_horizon_option(ui, play, horizon_on) {
             self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
             self.save_settings();
         }
-        if play_button(ui, play, label, live, horizon_on && !live) {
+        if play_button(ui, play, label, stop, horizon_on && !stop) {
             self.join = None;
-            self.play();
-        }
-        if let Some((progress, _)) = self.job_line() {
-            let bar = egui::Rect::from_min_max(
-                egui::pos2(play.left(), play.bottom() - 4.0),
-                egui::pos2(play.left() + play.width() * progress.clamp(0.0, 1.0), play.bottom()),
-            );
-            ui.painter().rect_filled(bar, 2.0, egui::Color32::from_white_alpha(180));
+            if live {
+                self.play();
+            } else if installing {
+                self.cancel_install();
+            } else {
+                self.play();
+            }
         }
     }
 

@@ -180,38 +180,63 @@ pub fn detail(id: &str, version: &str, loader: &str, kind: &str) -> Result<Detai
     })
 }
 
-pub fn install(detail: &Detail, optional: &[String], dest: &Path, with_deps: bool, as_pack: bool) -> Outcome {
+pub fn install(
+    detail: &Detail,
+    optional: &[String],
+    dest: &Path,
+    with_deps: bool,
+    as_pack: bool,
+    cancel: &std::sync::atomic::AtomicBool,
+    mut on: impl FnMut(f32),
+) -> Outcome {
     if detail.file_url.is_empty() {
         return Outcome { note: "No file for this version.".into(), pack: None };
     }
     if let Err(e) = std::fs::create_dir_all(dest) {
         return Outcome { note: e.to_string(), pack: None };
     }
-    let mut saved = Vec::new();
-    let mut skipped = Vec::new();
-    let mut failed = Vec::new();
-    match write_url(&detail.file_url, &detail.file_name, dest) {
-        Ok(Wrote::Saved(name)) => saved.push(name),
-        Ok(Wrote::Exists(name)) => skipped.push(name),
-        Err(e) => failed.push(e),
-    }
+    let mut files: Vec<(&str, &str, Option<&str>)> = vec![(&detail.file_url, &detail.file_name, None)];
     if with_deps {
         for dep in &detail.deps {
             let take = dep.kind == "required" || optional.iter().any(|id| id == &dep.project_id);
-            if !take {
-                continue;
-            }
-            if dep.file_url.is_empty() {
-                failed.push(format!("No file for {}", dep.title));
-                continue;
-            }
-            match write_url(&dep.file_url, &dep.file_name, dest) {
-                Ok(Wrote::Saved(name)) => saved.push(format!("{} ({name})", dep.title)),
-                Ok(Wrote::Exists(name)) => skipped.push(name),
-                Err(e) => failed.push(format!("{}: {e}", dep.title)),
+            if take {
+                files.push((&dep.file_url, &dep.file_name, Some(dep.title.as_str())));
             }
         }
     }
+    let n = files.len().max(1);
+    let mut saved = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+    for (i, (url, name, label)) in files.iter().enumerate() {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Outcome { note: "Download stopped".into(), pack: None };
+        }
+        if url.is_empty() {
+            let who = label.unwrap_or("this project");
+            failed.push(format!("No file for {who}"));
+            on(blend(i + 1, n, 0.0));
+            continue;
+        }
+        let report = |frac: f32| on(blend(i, n, frac));
+        match write_url(url, name, dest, cancel, report) {
+            Ok(Wrote::Saved(file)) => {
+                saved.push(match label {
+                    Some(title) => format!("{title} ({file})"),
+                    None => file,
+                });
+            }
+            Ok(Wrote::Exists(file)) => skipped.push(file),
+            Err(e) if e == "canceled" => {
+                return Outcome { note: "Download stopped".into(), pack: None };
+            }
+            Err(e) => failed.push(match label {
+                Some(title) => format!("{title}: {e}"),
+                None => e,
+            }),
+        }
+    }
+    on(1.0);
     let mut parts = Vec::new();
     if !saved.is_empty() {
         parts.push(format!("Installed {}", saved.join(", ")));
@@ -238,26 +263,26 @@ enum Wrote {
     Exists(String),
 }
 
-fn write_url(url: &str, file_name: &str, dest: &Path) -> Result<Wrote, String> {
+fn blend(index: usize, count: usize, file: f32) -> f32 {
+    let count = count.max(1) as f32;
+    ((index as f32 + file.clamp(0.0, 1.0)) / count).clamp(0.0, 1.0)
+}
+
+fn write_url(url: &str, file_name: &str, dest: &Path, cancel: &std::sync::atomic::AtomicBool, mut on: impl FnMut(f32)) -> Result<Wrote, String> {
     if !url.starts_with("https://") {
         return Err("Refusing a non-https download".into());
     }
     let name = safe_name(file_name).unwrap_or_else(|| "download.jar".into());
     let path = dest.join(&name);
     if path.exists() {
+        on(1.0);
         return Ok(Wrote::Exists(name));
     }
-    let bytes = net::get_bytes(url).map_err(|e| short_err("Download", &e))?;
-    if bytes.is_empty() {
-        return Err(format!("{name} was empty"));
+    match net::copy_url(url, &path, cancel, &mut on) {
+        Ok(_) => Ok(Wrote::Saved(name)),
+        Err(e) if e == "canceled" => Err(e),
+        Err(e) => Err(short_err("Download", &e)),
     }
-    let tmp = dest.join(format!(".{name}.part"));
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.to_string());
-    }
-    Ok(Wrote::Saved(name))
 }
 
 fn fetch_versions(id: &str, game: &str, loader: &str) -> Result<Value, String> {
@@ -452,6 +477,13 @@ mod tests {
         let shader = search_url("shader", "26.3", "fabric", "complementary");
         assert!(!shader.contains("categories"), "{shader}");
         assert!(shader.contains("query="), "{shader}");
+    }
+
+    #[test]
+    fn blend_walks_files_then_fills() {
+        assert!((blend(0, 2, 0.0) - 0.0).abs() < 0.001);
+        assert!((blend(0, 2, 0.5) - 0.25).abs() < 0.001);
+        assert!((blend(1, 2, 1.0) - 1.0).abs() < 0.001);
     }
 
     #[test]
