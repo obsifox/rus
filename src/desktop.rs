@@ -18,6 +18,7 @@ mod tabs;
 
 const WINDOW_W: f32 = 960.0;
 const WINDOW_H: f32 = 540.0;
+pub(crate) const HOME_RAIL: f32 = 72.0;
 
 const HY_BG: egui::Color32 = egui::Color32::from_rgb(0x15, 0x24, 0x3A);
 const HY_SURFACE: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x2F, 0x4B);
@@ -123,6 +124,7 @@ struct Desktop {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     tab: Tab,
+    home_pane: u8,
     versions: Vec<Ver>,
     versions_note: String,
     version_latest: String,
@@ -250,6 +252,7 @@ impl Desktop {
             tx: tx.clone(),
             rx,
             tab: Tab::from_name(&tab),
+            home_pane: 0,
             versions: Vec::new(),
             versions_note: "Loading versions…".into(),
             version_latest: String::new(),
@@ -1083,11 +1086,14 @@ impl Desktop {
         }
         if self.tab == Tab::Home {
             self.paint_home_rail(ui, full);
+            self.paint_version_bar(ui, full);
         } else {
             let player = self.paint_player_bar(ui, full);
             self.paint_shared_tabs(ui, full, player.right() + 10.0);
         }
-        self.paint_title_logo(ui, full);
+        if self.tab != Tab::Home || self.home_pane == 0 {
+            self.paint_title_logo(ui, full);
+        }
         self.paint_exit(ui, full);
         let now = ui.input(|i| i.time);
         if self.tab != self.seen_tab {
@@ -1095,7 +1101,14 @@ impl Desktop {
             self.tab_tick = now;
         }
         match self.tab {
-            Tab::Home => self.paint_chrome(ui, full),
+            Tab::Home => {
+                if self.home_pane == 1 {
+                    self.paint_mods_page(ui, full);
+                } else {
+                    self.paint_version_instances(ui, full);
+                    self.paint_chrome(ui, full);
+                }
+            }
             Tab::Versions => self.paint_version_page(ui, full),
             Tab::Mods => self.paint_mods_page(ui, full),
             Tab::Settings => self.page_in_panel(ui, full, Page::Settings),

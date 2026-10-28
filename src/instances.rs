@@ -14,6 +14,9 @@ pub struct Instance {
     pub version: String,
     pub loader: String,
     pub created: u128,
+    /// Shown in the three slots beside the version bar. At most three stay on.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 pub fn dir(app: &App, id: &str) -> PathBuf {
@@ -48,6 +51,7 @@ pub fn create(name: &str, version: &str, loader: &str) -> Instance {
         version,
         loader,
         created: now_ms(),
+        pinned: false,
     }
 }
 
