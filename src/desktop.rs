@@ -801,6 +801,10 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
+        if self.tab != Tab::Home {
+            // Blue theme over the whole page. 7% transparent, so a little wallpaper shows.
+            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(36, 62, 112, 237));
+        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -836,7 +840,6 @@ impl Desktop {
 
     fn page_in_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect, page: Page) {
         let panel = drect(full, 26.0, 96.0, 1228.0, 608.0);
-        page_veil(ui.painter(), panel);
         let inner = panel.shrink(us(full, 14.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
         style_page_widgets(&mut child);
@@ -1401,7 +1404,6 @@ impl Desktop {
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let veil = drect(full, 26.0, 96.0, 1228.0, 608.0);
-        page_veil(ui.painter(), veil);
         paint_gold_bar(ui.painter(), ux(full, 746.0), veil.top() + 16.0, veil.height() - 32.0);
         self.paint_version_list(ui, full);
         self.paint_loader_panel(ui, full);
@@ -2450,12 +2452,6 @@ fn paint_faded_rule(painter: &egui::Painter, x: f32, y: f32, w: f32) {
             egui::Color32::from_rgba_unmultiplied(214, 224, 234, alpha),
         );
     }
-}
-
-/// Content wash for Instance, Mods, and Settings. No template color:
-/// black at 15% opacity, so the wallpaper stays visible and only a little darker.
-fn page_veil(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(38));
 }
 
 fn paint_gold_bar(painter: &egui::Painter, x: f32, y: f32, h: f32) {
