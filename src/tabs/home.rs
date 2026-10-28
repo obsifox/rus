@@ -68,7 +68,7 @@ impl super::super::Desktop {
         let Some(tex) = &self.logo_title else { return };
         let side = 112.0;
         let rect = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 15.0 - side, full.top() + 25.0),
+            egui::pos2(full.right() - 30.0 - side, full.top() + 40.0),
             egui::vec2(side, side),
         );
         ui.painter().image(
