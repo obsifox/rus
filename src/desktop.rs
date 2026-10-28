@@ -801,6 +801,10 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
+        if self.tab == Tab::Versions {
+            // Whole version page: blue box, 4% transparent over the wallpaper.
+            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(36, 62, 112, 245));
+        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -1402,8 +1406,6 @@ impl Desktop {
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let veil = drect(full, 26.0, 96.0, 1228.0, 608.0);
-        page_veil(ui.painter(), veil);
-        paint_open_frame(ui.painter(), veil);
         paint_gold_bar(ui.painter(), ux(full, 746.0), veil.top() + 16.0, veil.height() - 32.0);
         self.paint_version_list(ui, full);
         self.paint_loader_panel(ui, full);
@@ -1417,7 +1419,7 @@ impl Desktop {
             egui::pos2(ux(full, 40.0), uy(full, 118.0)),
             egui::pos2(ux(full, 164.0) + count_w + us(full, 14.0), uy(full, 162.0)),
         );
-        paint_element_template(ui.painter(), head);
+        paint_version_corners(ui.painter(), head, false);
         paint_tracked(ui.painter(), egui::pos2(ux(full, 52.0), head.center().y), egui::Align2::LEFT_CENTER, "INSTANCES", head_font.clone(), MUTED, us(full, 1.2));
         paint_gold_bar(ui.painter(), ux(full, 148.0), head.top() + us(full, 6.0), head.height() - us(full, 12.0));
         paint_tracked(ui.painter(), egui::pos2(ux(full, 164.0), head.center().y), egui::Align2::LEFT_CENTER, &count, head_font, MUTED, us(full, 1.0));
@@ -1447,7 +1449,7 @@ impl Desktop {
             let font = body_font(us(full, 15.0));
             let w = ui.painter().layout_no_wrap(msg.to_string(), font.clone(), MUTED).size().x;
             let chip = egui::Rect::from_center_size(list.center(), egui::vec2(w + us(full, 28.0), us(full, 36.0)));
-            paint_element_template(ui.painter(), chip);
+            paint_version_corners(ui.painter(), chip, false);
             ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, msg, font, MUTED);
             let _ = ui.allocate_rect(list, Sense::hover());
         } else {
@@ -1457,10 +1459,7 @@ impl Desktop {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), row_h), Sense::click());
                     let on = self.instance_id == inst.id;
                     let chip = rect.shrink2(egui::vec2(us(full, 6.0), us(full, 5.0)));
-                    paint_element_template(ui.painter(), chip);
-                    if on {
-                        ui.painter().rect_stroke(chip.shrink(1.5), 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
-                    }
+                    paint_version_corners(ui.painter(), chip, on);
                     let name_ink = if on { GOLD } else { V_TEXT };
                     let mid_y = rect.center().y;
                     let bar_h = rect.height() * 0.42;
@@ -1485,7 +1484,7 @@ impl Desktop {
         }
 
         let foot = drect(full, 40.0, 636.0, 690.0, 52.0);
-        paint_element_template(&painter, foot);
+        paint_version_corners(&painter, foot, false);
         let bar_h = foot.height() * 0.42;
         let bar_y = foot.center().y - bar_h * 0.5;
         paint_gold_bar(&painter, foot.left() + us(full, 92.0), bar_y, bar_h);
@@ -1603,7 +1602,7 @@ impl Desktop {
             egui::pos2(ux(full, 778.0), uy(full, 118.0)),
             egui::pos2(ux(full, 790.0) + loader_w + us(full, 14.0), uy(full, 162.0)),
         );
-        paint_element_template(ui.painter(), loader_chip);
+        paint_version_corners(ui.painter(), loader_chip, false);
         paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), loader_chip.center().y), egui::Align2::LEFT_CENTER, "LOADER", loader_font, MUTED, us(full, 1.3));
         let for_mc = format!("FOR MC {}", self.selected);
         let for_font = sub_font(us(full, 13.0));
@@ -1614,7 +1613,7 @@ impl Desktop {
             egui::pos2(for_right, uy(full, 162.0)),
         );
         paint_gold_bar(ui.painter(), for_chip.left() - us(full, 14.0), uy(full, 124.0), us(full, 36.0));
-        paint_element_template(ui.painter(), for_chip);
+        paint_version_corners(ui.painter(), for_chip, false);
         paint_tracked(ui.painter(), egui::pos2(for_chip.right() - us(full, 10.0), for_chip.center().y), egui::Align2::RIGHT_CENTER, &for_mc, for_font, GOLD, us(full, 0.8));
 
         let mc = self.selected.clone();
@@ -1625,10 +1624,7 @@ impl Desktop {
             let rect = drect(full, 768.0, y, 483.0, 78.0);
             let on = self.loader_active(row.id);
             let chip = rect.shrink2(egui::vec2(us(full, 4.0), us(full, 6.0)));
-            paint_element_template(ui.painter(), chip);
-            if on {
-                ui.painter().rect_stroke(chip.shrink(1.5), 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
-            }
+            paint_version_corners(ui.painter(), chip, on);
             let hit = ui.interact(rect, egui::Id::new("loader-row").with(row.id), Sense::click());
             let bar_h = rect.height() * 0.36;
             let bar_y = rect.center().y - bar_h * 0.5;
@@ -1669,7 +1665,7 @@ impl Desktop {
             egui::pos2(ux(full, 778.0), foot_y - us(full, 16.0)),
             egui::pos2(ux(full, 790.0) + sel_w + us(full, 14.0), foot_y + us(full, 16.0)),
         );
-        paint_element_template(ui.painter(), sel_chip);
+        paint_version_corners(ui.painter(), sel_chip, false);
         paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), foot_y), egui::Align2::LEFT_CENTER, "SELECTED LOADER", sel_font, MUTED, us(full, 1.1));
         if self.loader == "forge+optifine" {
             let ver = selected.as_ref().map(|r| r.version.as_str()).unwrap_or("");
@@ -1685,7 +1681,7 @@ impl Desktop {
                 egui::pos2(right_edge - right_w - us(full, 22.0), foot_y - us(full, 16.0)),
                 egui::pos2(right_edge, foot_y + us(full, 16.0)),
             );
-            paint_element_template(ui.painter(), right_chip);
+            paint_version_corners(ui.painter(), right_chip, false);
             paint_tracked(ui.painter(), egui::pos2(right_chip.right() - us(full, 10.0), foot_y), egui::Align2::RIGHT_CENTER, &right, right_font, V_GOLD, us(full, 0.7));
         } else if let Some(row) = &selected {
             let right = if row.version.is_empty() {
@@ -1700,7 +1696,7 @@ impl Desktop {
                 egui::pos2(right_edge - right_w - us(full, 22.0), foot_y - us(full, 16.0)),
                 egui::pos2(right_edge, foot_y + us(full, 16.0)),
             );
-            paint_element_template(ui.painter(), right_chip);
+            paint_version_corners(ui.painter(), right_chip, false);
             paint_tracked(ui.painter(), egui::pos2(right_chip.right() - us(full, 10.0), foot_y), egui::Align2::RIGHT_CENTER, &right, right_font, V_GOLD, us(full, 0.7));
         }
         let install = drect(full, 786.0, 612.0, 448.0, 52.0);
@@ -3248,6 +3244,12 @@ fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
     paint_corner_caps(painter, rect, edge);
 }
 
+/// Version-page element: corner design only. No fill and no full stroke.
+fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
+    let color = if on { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    paint_corner_caps(painter, rect, color);
+}
+
 /// One element, one template. Slightly open so the wallpaper still shows through.
 fn paint_element_template(painter: &egui::Painter, rect: egui::Rect) {
     let fill = egui::Color32::from_rgba_unmultiplied(36, 62, 112, 226);
@@ -3434,7 +3436,7 @@ fn loader_badge_rect(full: egui::Rect, row: egui::Rect) -> egui::Rect {
 
 fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("loader-install"), Sense::click());
-    paint_element_template(ui.painter(), rect);
+    paint_version_corners(ui.painter(), rect, enabled);
     let ink = if enabled { GOLD } else { MUTED };
     if enabled {
         paint_material(ui.painter(), egui::pos2(rect.center().x - us_rect(rect, 54.0), rect.center().y), rect.height() * 0.36, I_DOWN, ink);
@@ -3448,10 +3450,7 @@ fn install_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, enabled: boo
 
 fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("pill-action").with(label), Sense::click());
-    paint_element_template(ui.painter(), rect);
-    if primary {
-        ui.painter().rect_stroke(rect.shrink(1.5), 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
-    }
+    paint_version_corners(ui.painter(), rect, primary);
     let ink = if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) };
     paint_material(ui.painter(), egui::pos2(rect.left() + rect.height() * 0.42, rect.center().y), rect.height() * 0.34, I_ADD, ink);
     ui.painter().text(egui::pos2(rect.center().x + 8.0, rect.center().y), egui::Align2::CENTER_CENTER, label, nav_font(rect.height() * 0.32), ink);
