@@ -1443,7 +1443,12 @@ impl Desktop {
         let ui = &mut child;
         ui.set_min_size(list.size());
         if rows.is_empty() {
-            ui.painter().text(list.center(), egui::Align2::CENTER_CENTER, "No instances yet", body_font(us(full, 15.0)), V_MUTED);
+            let msg = "No instances yet";
+            let font = body_font(us(full, 15.0));
+            let w = ui.painter().layout_no_wrap(msg.to_string(), font.clone(), MUTED).size().x;
+            let chip = egui::Rect::from_center_size(list.center(), egui::vec2(w + us(full, 28.0), us(full, 36.0)));
+            paint_element_template(ui.painter(), chip);
+            ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, msg, font, MUTED);
             let _ = ui.allocate_rect(list, Sense::hover());
         } else {
             egui::ScrollArea::vertical().id_salt("instance-list").auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
@@ -1451,8 +1456,10 @@ impl Desktop {
                 for inst in &rows {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), row_h), Sense::click());
                     let on = self.instance_id == inst.id;
-                    if resp.hovered() && !on {
-                        ui.painter().rect_filled(rect, 0.0, egui::Color32::from_white_alpha(10));
+                    let chip = rect.shrink2(egui::vec2(us(full, 6.0), us(full, 5.0)));
+                    paint_element_template(ui.painter(), chip);
+                    if on {
+                        ui.painter().rect_stroke(chip.shrink(1.5), 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
                     }
                     let name_ink = if on { GOLD } else { V_TEXT };
                     let mid_y = rect.center().y;
@@ -1617,10 +1624,12 @@ impl Desktop {
             let y = 168.0 + i as f32 * 78.0;
             let rect = drect(full, 768.0, y, 483.0, 78.0);
             let on = self.loader_active(row.id);
-            let hit = ui.interact(rect, egui::Id::new("loader-row").with(row.id), Sense::click());
-            if hit.hovered() && !on && self.shot.is_none() {
-                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_white_alpha(8));
+            let chip = rect.shrink2(egui::vec2(us(full, 4.0), us(full, 6.0)));
+            paint_element_template(ui.painter(), chip);
+            if on {
+                ui.painter().rect_stroke(chip.shrink(1.5), 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
             }
+            let hit = ui.interact(rect, egui::Id::new("loader-row").with(row.id), Sense::click());
             let bar_h = rect.height() * 0.36;
             let bar_y = rect.center().y - bar_h * 0.5;
             let icon = egui::Rect::from_center_size(egui::pos2(ux(full, 814.0), rect.center().y), egui::vec2(us(full, 32.0), us(full, 32.0)));
@@ -1631,7 +1640,7 @@ impl Desktop {
             let name_ink = if on { GOLD } else { V_TEXT };
             ui.painter().text(egui::pos2(ux(full, 852.0), rect.center().y), egui::Align2::LEFT_CENTER, row.name, title_font(us(full, 18.0)), name_ink);
             let detail = loader_detail(row, &mc, self.loaders.ready);
-            let detail_color = if row.kind == crate::loaders::Badge::Preview { GOLD } else { V_MUTED };
+            let detail_color = if row.kind == crate::loaders::Badge::Preview { GOLD } else { MUTED };
             ui.painter().text(egui::pos2(ux(full, 988.0), rect.center().y), egui::Align2::LEFT_CENTER, &detail, body_font(us(full, 15.0)), detail_color);
             let badge = loader_badge_rect(full, rect);
             paint_gold_bar(ui.painter(), badge.left() - us(full, 10.0), bar_y, bar_h);
@@ -1855,7 +1864,17 @@ impl Desktop {
             })
             .show(ui, |ui| {
             for (name, on, size) in self.mods.clone() {
-                ui.horizontal(|ui| {
+                let width = ui.available_width();
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 36.0), Sense::hover());
+                let chip = rect.shrink2(egui::vec2(0.0, 3.0));
+                paint_element_template(ui.painter(), chip);
+                if on {
+                    ui.painter().rect_stroke(chip.shrink(1.5), 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
+                }
+                let inner = chip.shrink2(egui::vec2(8.0, 2.0));
+                let mut row = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+                row.set_clip_rect(chip.shrink(1.5));
+                row.horizontal(|ui| {
                     let mut enabled = on;
                     if check_inline(ui, &mut enabled, &name, 280.0) {
                         let _ = crate::mods::toggle(&self.app, &name);
@@ -1869,7 +1888,7 @@ impl Desktop {
                         spawn_mods(self.app.clone(), self.tx.clone());
                     }
                 });
-                ui.add_space(4.0);
+                ui.add_space(2.0);
             }
         });
     }
@@ -2034,7 +2053,14 @@ impl Desktop {
                     });
                     let rows: Vec<(String, String, String)> = self.servers.iter().map(|s| (s.name.clone(), s.address.clone(), s.icon.clone())).collect();
                     for (name, addr, icon) in rows {
-                        ui.horizontal(|ui| {
+                        let width = ui.available_width();
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 34.0), Sense::hover());
+                        let chip = rect.shrink2(egui::vec2(0.0, 3.0));
+                        paint_element_template(ui.painter(), chip);
+                        let inner = chip.shrink2(egui::vec2(8.0, 1.0));
+                        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+                        row.set_clip_rect(chip.shrink(1.5));
+                        row.horizontal(|ui| {
                             let label = if name.is_empty() { addr.clone() } else { name.clone() };
                             ui.label(RichText::new(label).font(body_font(13.0)).color(if icon.is_empty() { MUTED } else { TEXT }));
                             gold_slot(ui, 28.0);
@@ -2048,6 +2074,7 @@ impl Desktop {
                                 }
                             }
                         });
+                        ui.add_space(2.0);
                     }
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
