@@ -58,9 +58,9 @@ impl SkinPreview {
             ArmModel::Auto => detected_slim,
         };
         ui.vertical(|ui| {
-            ui.set_width(168.0);
-            ui.set_max_width(168.0);
-            let size = egui::vec2(168.0, 150.0);
+            ui.set_width(148.0);
+            ui.set_max_width(148.0);
+            let size = egui::vec2(148.0, 132.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
             let anim = self.auto_rotate || self.walk;
             if anim {
@@ -147,16 +147,12 @@ impl SkinPreview {
                     egui::Color32::WHITE,
                 );
             }
-            ui.painter().rect_stroke(
-                rect,
-                8.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(0x3E, 0x6C, 0xA4)),
-                egui::StrokeKind::Inside,
-            );
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if view_button(ui, "Front") { self.yaw = 0.0; self.pitch = 0.12; self.dirty = true; }
+                gold_tick(ui);
                 if view_button(ui, "Back") { self.yaw = std::f32::consts::PI; self.pitch = 0.12; self.dirty = true; }
+                gold_tick(ui);
                 if view_button(ui, "Side") { self.yaw = std::f32::consts::FRAC_PI_2; self.pitch = 0.12; self.dirty = true; }
             });
             ui.add_space(2.0);
@@ -166,11 +162,14 @@ impl SkinPreview {
             toggle(ui, &mut self.walk, "Walk", &mut self.dirty);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                for (model, label) in [
+                for (i, (model, label)) in [
                     (ArmModel::Auto, "Auto"),
                     (ArmModel::Classic, "Classic"),
                     (ArmModel::Slim, "Slim"),
-                ] {
+                ].into_iter().enumerate() {
+                    if i > 0 {
+                        gold_tick(ui);
+                    }
                     let on = self.arms == model;
                     if model_button(ui, label, on) {
                         self.arms = model;
@@ -183,20 +182,43 @@ impl SkinPreview {
 }
 
 fn view_button(ui: &mut egui::Ui, label: &str) -> bool {
-    ui.add(egui::Button::new(label).min_size(egui::vec2(50.0, 24.0))).clicked()
+    text_hit(ui, label, false)
 }
 
 fn model_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    let text = egui::RichText::new(label).color(egui::Color32::from_rgb(220, 232, 235));
-    let mut b = egui::Button::new(text).min_size(egui::vec2(50.0, 24.0));
-    if on {
-        b = b.fill(egui::Color32::from_rgb(92, 74, 36));
-    }
-    ui.add(b).clicked()
+    text_hit(ui, label, on)
+}
+
+fn text_hit(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(52.0, 22.0), egui::Sense::click());
+    let ink = if on {
+        egui::Color32::from_rgb(0xF4, 0xCA, 0x54)
+    } else {
+        egui::Color32::WHITE
+    };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), ink);
+    resp.clicked()
+}
+
+fn gold_tick(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 22.0), egui::Sense::hover());
+    ui.painter().vline(
+        rect.center().x,
+        rect.top() + 4.0..=rect.bottom() - 4.0,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(0xF4, 0xCA, 0x54)),
+    );
 }
 
 fn toggle(ui: &mut egui::Ui, value: &mut bool, label: &str, dirty: &mut bool) {
-    if ui.checkbox(value, label).changed() {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(80.0), 20.0), egui::Sense::click());
+    let ink = if *value {
+        egui::Color32::from_rgb(0xF4, 0xCA, 0x54)
+    } else {
+        egui::Color32::WHITE
+    };
+    ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.0), ink);
+    if resp.clicked() {
+        *value = !*value;
         *dirty = true;
     }
 }

@@ -22,7 +22,7 @@ struct Tri {
 }
 
 pub fn render(skin: &RgbaImage, cape: Option<&RgbaImage>, view: &View) -> RgbaImage {
-    let mut img = RgbaImage::from_pixel(view.width.max(1), view.height.max(1), Rgba([11, 13, 10, 255]));
+    let mut img = RgbaImage::from_pixel(view.width.max(1), view.height.max(1), Rgba([0, 0, 0, 0]));
     paint_shadow(&mut img);
     let mut depth = vec![f32::INFINITY; (img.width() * img.height()) as usize];
     let parts = skinmodel::player_parts(view.slim, view.walk, view.cape && cape.is_some());
