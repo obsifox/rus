@@ -15,19 +15,6 @@ use std::time::Duration;
 const WINDOW_W: f32 = 960.0;
 const WINDOW_H: f32 = 540.0;
 
-const BG: egui::Color32 = egui::Color32::from_rgb(0x08, 0x10, 0x1C);
-const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x10, 0x1A, 0x2C);
-const SURFACE2: egui::Color32 = egui::Color32::from_rgb(0x16, 0x24, 0x3A);
-const SELECTED: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x30, 0x4E);
-const BORDER: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x52, 0x80);
-const BORDER_BTN: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x6C, 0xA4);
-const BORDER_INPUT: egui::Color32 = egui::Color32::from_rgb(0x4A, 0x74, 0xB0);
-const MARKER_OFF: egui::Color32 = egui::Color32::from_rgb(0x2A, 0x40, 0x5C);
-const TEXT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
-const MUTED: egui::Color32 = egui::Color32::from_rgb(0xB4, 0xC2, 0xD4);
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3B, 0x82, 0xF6);
-const ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
-const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xCA, 0x54);
 const HY_BG: egui::Color32 = egui::Color32::from_rgb(0x15, 0x24, 0x3A);
 const HY_SURFACE: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x2F, 0x4B);
 const HY_HIGH: egui::Color32 = egui::Color32::from_rgb(0x24, 0x3B, 0x5E);
@@ -36,16 +23,29 @@ const HY_TEXT: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xEE, 0xF7);
 const HY_MUTED: egui::Color32 = egui::Color32::from_rgb(0x9F, 0xB0, 0xC8);
 const HY_ACCENT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xB8, 0x4B);
 const HY_LINK: egui::Color32 = egui::Color32::from_rgb(0x5F, 0xA8, 0xFF);
-const SPEC_YELLOW: egui::Color32 = GOLD;
-const SPEC_TEXT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xF5, 0xFF);
-const SPEC_MUTED: egui::Color32 = egui::Color32::from_rgb(0xA9, 0xB8, 0xDD);
+const BG: egui::Color32 = HY_BG;
+const SURFACE: egui::Color32 = HY_SURFACE;
+const SURFACE2: egui::Color32 = HY_BG;
+const SELECTED: egui::Color32 = HY_HIGH;
+const BORDER: egui::Color32 = HY_BORDER;
+const BORDER_BTN: egui::Color32 = HY_BORDER;
+const BORDER_INPUT: egui::Color32 = HY_LINK;
+const MARKER_OFF: egui::Color32 = HY_BORDER;
+const TEXT: egui::Color32 = HY_TEXT;
+const MUTED: egui::Color32 = HY_MUTED;
+const ACCENT: egui::Color32 = HY_LINK;
+const ON_ACCENT: egui::Color32 = HY_BG;
+const GOLD: egui::Color32 = HY_ACCENT;
+const SPEC_YELLOW: egui::Color32 = HY_ACCENT;
+const SPEC_TEXT: egui::Color32 = HY_TEXT;
+const SPEC_MUTED: egui::Color32 = HY_MUTED;
 const SPEC_GREEN: egui::Color32 = egui::Color32::from_rgb(0x7F, 0xE0, 0x8B);
-const SPEC_PANEL: egui::Color32 = egui::Color32::from_rgb(0x16, 0x25, 0x5A);
-const SPEC_EDGE: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x55, 0x99);
-const SPEC_ITEM: egui::Color32 = egui::Color32::from_rgb(0x1B, 0x2D, 0x63);
-const SPEC_SEL: egui::Color32 = egui::Color32::from_rgb(0x26, 0x41, 0x8A);
-fn glass_fill() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(12, 22, 40, 228) }
-fn glass_hover() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(22, 38, 64, 236) }
+const SPEC_PANEL: egui::Color32 = HY_BG;
+const SPEC_EDGE: egui::Color32 = HY_BORDER;
+const SPEC_ITEM: egui::Color32 = HY_SURFACE;
+const SPEC_SEL: egui::Color32 = HY_HIGH;
+fn glass_fill() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, 228) }
+fn glass_hover() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(0x24, 0x3B, 0x5E, 236) }
 const ERR: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xA0, 0x98);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -148,6 +148,10 @@ struct Desktop {
     shot: Option<String>,
     frames: u32,
     shot_requested: bool,
+    tour: bool,
+    tour_start: f64,
+    seen_tab: Tab,
+    tab_tick: f64,
     film: usize,
     play_after: bool,
     preview: SkinPreview,
@@ -165,7 +169,7 @@ struct Desktop {
 }
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
-    let viewport = egui::ViewportBuilder::default()
+    let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([WINDOW_W, WINDOW_H])
         .with_min_inner_size([WINDOW_W, WINDOW_H])
         .with_max_inner_size([WINDOW_W, WINDOW_H])
@@ -173,6 +177,9 @@ pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
         .with_resizable(false)
         .with_title("Rus")
         .with_icon(icon_data());
+    if std::env::var("RUS_TOUR").ok().as_deref() == Some("1") {
+        viewport = viewport.with_position([40.0, 30.0]);
+    }
     let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("Rus", options, Box::new(move |cc| Ok(Box::new(Desktop::new(cc, shot, tab)))))
         .map_err(|e| e.to_string())
@@ -248,6 +255,10 @@ impl Desktop {
             shot,
             frames: 0,
             shot_requested: false,
+            tour: std::env::var("RUS_TOUR").ok().as_deref() == Some("1"),
+            tour_start: 0.0,
+            seen_tab: Tab::from_name(&tab),
+            tab_tick: 0.0,
             film: 0,
             play_after: false,
             preview,
@@ -263,6 +274,10 @@ impl Desktop {
             draft_name: String::new(),
             draft_version,
         };
+        if me.tour {
+            me.tab = Tab::Home;
+            me.seen_tab = Tab::Home;
+        }
         me.bind_instances(&settings.last_instance);
         spawn_versions(app.clone(), tx.clone());
         spawn_mods(app.clone(), tx.clone());
@@ -787,7 +802,7 @@ impl Desktop {
 
 impl eframe::App for Desktop {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0x0B as f32 / 255.0, 0x0D as f32 / 255.0, 0x0A as f32 / 255.0, 1.0]
+        [0x15 as f32 / 255.0, 0x24 as f32 / 255.0, 0x3A as f32 / 255.0, 1.0]
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -798,7 +813,9 @@ impl eframe::App for Desktop {
             self.reload_server_icons(ctx);
             self.icons_dirty = false;
         }
-        ctx.request_repaint_after(Duration::from_millis(if self.preview.auto_rotate || self.preview.walk { 16 } else { 250 }));
+        self.drive_tour(ctx);
+        let fast = self.tour || self.preview.auto_rotate || self.preview.walk;
+        ctx.request_repaint_after(Duration::from_millis(if fast { 16 } else { 32 }));
         if !ctx.wants_keyboard_input() {
             if ctx.input(|i| i.key_pressed(egui::Key::Num1)) { self.tab = Tab::Home; }
             if ctx.input(|i| i.key_pressed(egui::Key::Num2)) { self.tab = Tab::Versions; }
@@ -861,15 +878,40 @@ impl eframe::App for Desktop {
 }
 
 impl Desktop {
+    fn drive_tour(&mut self, ctx: &egui::Context) {
+        if !self.tour {
+            return;
+        }
+        let now = ctx.input(|i| i.time);
+        if self.tour_start == 0.0 {
+            self.tour_start = now;
+        }
+        let age = now - self.tour_start;
+        self.tab = if age < 2.0 {
+            Tab::Home
+        } else if age < 6.8 {
+            Tab::Versions
+        } else if age < 9.4 {
+            Tab::Mods
+        } else if age < 12.4 {
+            Tab::Settings
+        } else {
+            Tab::Home
+        };
+        if (4.2..5.4).contains(&age) {
+            self.loader = "vanilla".into();
+        } else if (5.4..6.8).contains(&age) {
+            self.loader = "forge".into();
+        }
+    }
+
     fn shell(&mut self, ui: &mut egui::Ui) {
         use_page_fonts(ui);
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        if self.tab == Tab::Versions {
-            // One color under every layer, 40% transparent, on the wallpaper.
-            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, 153));
-        }
+        // Same palette veil on every page, 40% transparent, over the wallpaper.
+        ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, 153));
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -882,11 +924,22 @@ impl Desktop {
         let player = self.paint_player_bar(ui, full);
         self.paint_shared_tabs(ui, full, player.right() + 8.0);
         self.paint_exit(ui, full);
+        let now = ui.input(|i| i.time);
+        if self.tab != self.seen_tab {
+            self.seen_tab = self.tab;
+            self.tab_tick = now;
+        }
         match self.tab {
             Tab::Home => self.paint_chrome(ui, full),
             Tab::Versions => self.paint_version_page(ui, full),
             Tab::Mods => self.paint_mods_page(ui, full),
             Tab::Settings => self.page_in_panel(ui, full, Page::Settings),
+        }
+        let age = (now - self.tab_tick) as f32;
+        let fade = ease_out((age / 0.26).clamp(0.0, 1.0));
+        if fade < 0.995 {
+            let body = egui::Rect::from_min_max(egui::pos2(full.left(), 62.0), full.right_bottom());
+            ui.painter().rect_filled(body, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, ((1.0 - fade) * 168.0) as u8));
         }
         if self.draft_open {
             self.paint_instance_popup(ui, full);
@@ -945,11 +998,15 @@ impl Desktop {
         let bar = egui::Rect::from_min_size(egui::pos2(left, uy(full, 16.0)), egui::vec2(total, h));
         paint_hytale_bar(ui.painter(), bar);
         let mut x = bar.left();
+        let mut rects = Vec::with_capacity(tabs.len());
         for (i, tab) in tabs.into_iter().enumerate() {
             let rect = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(widths[i], h));
+            rects.push(rect);
             let hit = ui.interact(rect, egui::Id::new("hynav").with(tab.label()), Sense::click());
             let on = self.tab == tab;
-            let color = if on { GOLD } else { egui::Color32::WHITE };
+            let active_t = ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("nav-on").with(tab.label()), on, 0.16));
+            let hover_t = ui.ctx().animate_bool_with_time(egui::Id::new("nav-hov").with(tab.label()), hit.hovered(), 0.1);
+            let color = lerp_color(HY_TEXT, HY_ACCENT, active_t.max(hover_t * 0.4));
             if tab == Tab::Home {
                 paint_nav_house(ui.painter(), rect.center(), h * 0.28, color);
             } else {
@@ -968,18 +1025,22 @@ impl Desktop {
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
-            if on {
-                let underline = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + 10.0, rect.bottom() - 3.0),
-                    egui::pos2(rect.right() - 10.0, rect.bottom() - 1.0),
-                );
-                ui.painter().rect_filled(underline, 0.0, GOLD);
-            }
             if hit.clicked() {
                 self.tab = tab;
             }
             hit.on_hover_text(tab.label());
             x += widths[i];
+        }
+        let index = tabs.iter().position(|t| *t == self.tab).unwrap_or(0) as f32;
+        let slide = ui.ctx().animate_value_with_time(egui::Id::new("nav-slide"), index, 0.2);
+        let i0 = slide.floor() as usize;
+        let i1 = (i0 + 1).min(rects.len().saturating_sub(1));
+        if let (Some(a), Some(b)) = (rects.get(i0), rects.get(i1)) {
+            let frac = slide - i0 as f32;
+            let left = a.left() + (b.left() - a.left()) * frac + 10.0;
+            let right = a.right() + (b.right() - a.right()) * frac - 10.0;
+            let underline = egui::Rect::from_min_max(egui::pos2(left, a.bottom() - 3.0), egui::pos2(right, a.bottom() - 1.0));
+            ui.painter().rect_filled(underline, 0.0, GOLD);
         }
         let sep_h = us(full, 52.0) * 0.44;
         let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("tab-seps")));
@@ -1543,7 +1604,8 @@ impl Desktop {
                 ui.add_space(6.0);
                 let rect = slot;
                 let on = self.instance_id == inst.id;
-                paint_opaque_card(ui.painter(), rect, on);
+                let picked = ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("inst-card").with(&inst.id), on, 0.18));
+                paint_opaque_card(ui.painter(), rect, picked);
                 let icon = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 11.0), egui::vec2(36.0, 36.0));
                 if let Some(tex) = self.loader_icon_for(&inst.loader) {
                     ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
@@ -1551,7 +1613,8 @@ impl Desktop {
                 let select = egui::Rect::from_min_size(egui::pos2(rect.right() - 138.0, rect.top() + 14.0), egui::vec2(68.0, 30.0));
                 let delete = egui::Rect::from_min_size(egui::pos2(rect.right() - 64.0, rect.top() + 14.0), egui::vec2(54.0, 30.0));
                 let name = ellipsize(ui.painter(), &inst.name, title_font(16.0), select.left() - icon.right() - 20.0);
-                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 20.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), if on { HY_ACCENT } else { HY_TEXT });
+                let name_ink = lerp_color(HY_TEXT, HY_ACCENT, ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("inst-card").with(&inst.id), on, 0.18)));
+                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 20.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), name_ink);
                 let sub = format!("{} · {}", inst.version, crate::state::loader_label(&inst.loader));
                 ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 38.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &sub, sub_font(13.0), select.left() - icon.right() - 20.0), sub_font(13.0), HY_MUTED);
                 if opaque_button(ui, select, if on { "Selected" } else { "Select" }, on) {
@@ -1595,15 +1658,15 @@ impl Desktop {
             let on = self.loader_active(row.id);
             let pair = row.id == "optifine" && forge_on && !on;
             let fade = any_on && !on && !pair && !missing;
+            let on_t = ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("ld-on").with(row.id), on && !missing, 0.16));
+            let fade_t = ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("ld-fade").with(row.id), fade, 0.2));
             if pair {
                 paint_purple_card(ui.painter(), rect);
             } else if missing {
                 ui.painter().rect_filled(rect, 1.5, HY_BG);
                 ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
-            } else if fade {
-                paint_faded_card(ui.painter(), rect);
             } else {
-                paint_opaque_card(ui.painter(), rect, on);
+                paint_mixed_card(ui.painter(), rect, on_t, fade_t);
             }
             let switch = egui::Rect::from_min_size(egui::pos2(rect.right() - 48.0, rect.center().y - 8.0), egui::vec2(40.0, 16.0));
             let warn = egui::Rect::from_min_size(egui::pos2(switch.left() - 4.0 - 16.0, rect.center().y - 8.0), egui::vec2(16.0, 16.0));
@@ -1617,12 +1680,10 @@ impl Desktop {
             let text_right = if missing { warn.left() - 8.0 } else { switch.left() - 8.0 };
             let ink = if pair {
                 egui::Color32::from_rgb(0xC4, 0xB0, 0xFF)
-            } else if on {
-                HY_ACCENT
-            } else if missing || fade {
+            } else if missing {
                 HY_MUTED
             } else {
-                HY_TEXT
+                lerp_color(lerp_color(HY_TEXT, HY_ACCENT, on_t), HY_MUTED, fade_t)
             };
             let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
             let detail_ink = if pair { egui::Color32::from_rgb(0xA7, 0x8B, 0xFA) } else { HY_MUTED };
@@ -2807,8 +2868,12 @@ fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool, hor
         ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(1.15, egui::Color32::from_rgb(236, 206, 128)), egui::StrokeKind::Inside);
         (egui::Color32::from_rgb(255, 236, 196), body_font(rect.height() * 0.34))
     } else {
-        paint_hytale_bar(ui.painter(), rect);
-        (egui::Color32::from_rgb(255, 246, 226), nav_font(rect.height() * 0.32))
+        let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.12);
+        let fill = lerp_color(HY_BG, HY_HIGH, hot);
+        ui.painter().rect_filled(rect, 1.5, fill);
+        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, lerp_color(HY_BORDER, HY_ACCENT, hot)), egui::StrokeKind::Inside);
+        paint_corner_caps(ui.painter(), rect, lerp_color(HY_BORDER, HY_ACCENT, hot));
+        (HY_TEXT, nav_font(rect.height() * 0.32))
     };
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, text_color);
     if hit.hovered() {
@@ -3224,7 +3289,7 @@ fn paint_faded_rule(painter: &egui::Painter, x: f32, y: f32, w: f32) {
 /// Content wash for Instance, Mods, and Settings. No template color:
 /// black at 15% opacity, so the wallpaper stays visible and only a little darker.
 fn page_veil(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(38));
+    painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, 153));
 }
 
 fn paint_gold_bar(painter: &egui::Painter, x: f32, y: f32, h: f32) {
@@ -3239,7 +3304,7 @@ fn paint_gold_bar(painter: &egui::Painter, x: f32, y: f32, h: f32) {
         }
         let y0 = y + h * (i as f32 / steps as f32);
         let y1 = y + h * ((i + 1) as f32 / steps as f32);
-        let color = egui::Color32::from_rgba_unmultiplied(0xF4, 0xCA, 0x54, alpha);
+        let color = egui::Color32::from_rgba_unmultiplied(0xF2, 0xB8, 0x4B, alpha);
         painter.vline(x, y0..=y1, egui::Stroke::new(1.0, color));
     }
 }
@@ -3484,8 +3549,8 @@ fn style_ui(ctx: &egui::Context) {
     style.visuals.window_fill = BG;
     style.visuals.extreme_bg_color = BG;
     style.visuals.override_text_color = Some(TEXT);
-    style.visuals.selection.bg_fill = egui::Color32::from_rgb(92, 74, 36);
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(210, 170, 70));
+    style.visuals.selection.bg_fill = HY_HIGH;
+    style.visuals.selection.stroke = egui::Stroke::new(1.0, HY_ACCENT);
     let radius = egui::CornerRadius::same(2);
     for w in [
         &mut style.visuals.widgets.noninteractive,
@@ -3495,14 +3560,14 @@ fn style_ui(ctx: &egui::Context) {
         &mut style.visuals.widgets.open,
     ] {
         w.corner_radius = radius;
-        w.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(158, 176, 198));
-        w.fg_stroke.color = egui::Color32::from_rgb(220, 232, 235);
+        w.bg_stroke = egui::Stroke::new(1.0, HY_BORDER);
+        w.fg_stroke.color = HY_TEXT;
     }
-    style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(28, 40, 64);
-    style.visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(70, 58, 32);
-    style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(120, 96, 42);
-    style.visuals.widgets.active.weak_bg_fill = egui::Color32::from_rgb(120, 96, 42);
-    style.visuals.widgets.active.fg_stroke.color = egui::Color32::from_rgb(220, 232, 235);
+    style.visuals.widgets.inactive.weak_bg_fill = HY_SURFACE;
+    style.visuals.widgets.hovered.weak_bg_fill = HY_HIGH;
+    style.visuals.widgets.active.bg_fill = HY_ACCENT;
+    style.visuals.widgets.active.weak_bg_fill = HY_ACCENT;
+    style.visuals.widgets.active.fg_stroke.color = HY_BG;
     style.visuals.window_corner_radius = radius;
     style.visuals.menu_corner_radius = radius;
     style.visuals.widgets.inactive.bg_fill = MARKER_OFF;
@@ -3843,24 +3908,24 @@ fn format_bytes(n: u64) -> String {
     if n < 1024 { format!("{n} B") } else if n < 1024 * 1024 { format!("{} KB", n / 1024) } else { format!("{:.1} MB", n as f64 / 1_048_576.0) }
 }
 
-const V_PANEL: egui::Color32 = egui::Color32::from_rgb(13, 22, 39);
-const V_BORDER: egui::Color32 = egui::Color32::from_rgb(42, 58, 88);
-const V_SEL: egui::Color32 = egui::Color32::from_rgb(26, 43, 73);
-const V_LINE: egui::Color32 = egui::Color32::from_rgb(30, 42, 64);
-const V_GOLD: egui::Color32 = egui::Color32::from_rgb(232, 195, 104);
-const V_GOLD_EDGE: egui::Color32 = egui::Color32::from_rgb(168, 140, 72);
-const V_MUTED: egui::Color32 = egui::Color32::from_rgb(126, 146, 174);
-const V_TEXT: egui::Color32 = egui::Color32::from_rgb(242, 246, 252);
+const V_PANEL: egui::Color32 = HY_BG;
+const V_BORDER: egui::Color32 = HY_BORDER;
+const V_SEL: egui::Color32 = HY_HIGH;
+const V_LINE: egui::Color32 = HY_BORDER;
+const V_GOLD: egui::Color32 = HY_ACCENT;
+const V_GOLD_EDGE: egui::Color32 = HY_ACCENT;
+const V_MUTED: egui::Color32 = HY_MUTED;
+const V_TEXT: egui::Color32 = HY_TEXT;
 const V_GREEN: egui::Color32 = egui::Color32::from_rgb(93, 192, 74);
 const V_GREEN_INK: egui::Color32 = egui::Color32::from_rgb(16, 36, 18);
-const V_TAB: egui::Color32 = egui::Color32::from_rgb(15, 25, 44);
-const V_TAB_ON: egui::Color32 = egui::Color32::from_rgb(27, 43, 72);
-const V_TAB_EDGE: egui::Color32 = egui::Color32::from_rgb(38, 52, 79);
-const V_TAB_ON_EDGE: egui::Color32 = egui::Color32::from_rgb(58, 77, 112);
-const V_RELEASE: egui::Color32 = egui::Color32::from_rgb(44, 46, 48);
-const V_BLUE: egui::Color32 = egui::Color32::from_rgb(74, 131, 234);
+const V_TAB: egui::Color32 = HY_BG;
+const V_TAB_ON: egui::Color32 = HY_HIGH;
+const V_TAB_EDGE: egui::Color32 = HY_BORDER;
+const V_TAB_ON_EDGE: egui::Color32 = HY_ACCENT;
+const V_RELEASE: egui::Color32 = HY_SURFACE;
+const V_BLUE: egui::Color32 = HY_LINK;
 const V_PREVIEW: egui::Color32 = egui::Color32::from_rgb(110, 78, 40);
-const V_PREVIEW_INK: egui::Color32 = egui::Color32::from_rgb(242, 220, 180);
+const V_PREVIEW_INK: egui::Color32 = HY_ACCENT;
 
 const I_HOME: char = '\u{E88A}';
 const I_LAYERS: char = '\u{E53B}';
@@ -3913,7 +3978,7 @@ fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
 
 /// Page outline only. No fill, so the wallpaper stays open.
 fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
-    let edge = egui::Color32::from_rgb(196, 214, 232);
+    let edge = HY_BORDER;
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
 }
@@ -3921,7 +3986,7 @@ fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
 /// Version-page element: stroke the length and the width, keep the corner cap,
 /// and keep the smaller cap inside each corner.
 fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
-    let color = if on { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    let color = if on { GOLD } else { HY_BORDER };
     let side = egui::Stroke::new(1.15, color);
     let corner = egui::Stroke::new(1.35, color);
     let left = rect.left() + 1.0;
@@ -3956,8 +4021,8 @@ fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
 
 /// One element, one template. Slightly open so the wallpaper still shows through.
 fn paint_element_template(painter: &egui::Painter, rect: egui::Rect) {
-    let fill = egui::Color32::from_rgba_unmultiplied(36, 62, 112, 226);
-    let edge = egui::Color32::from_rgb(196, 214, 232);
+    let fill = HY_SURFACE;
+    let edge = HY_BORDER;
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
@@ -4175,17 +4240,26 @@ fn paint_main_box(painter: &egui::Painter, rect: egui::Rect) {
     paint_corner_caps(painter, rect, HY_BORDER);
 }
 
-fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
-    let fill = if selected { HY_HIGH } else { HY_SURFACE };
-    let edge = if selected { HY_ACCENT } else { HY_BORDER };
+fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: f32) {
+    paint_mixed_card(painter, rect, selected, 0.0);
+}
+
+fn paint_mixed_card(painter: &egui::Painter, rect: egui::Rect, selected: f32, fade: f32) {
+    let selected = selected.clamp(0.0, 1.0);
+    let fade = fade.clamp(0.0, 1.0);
+    let fill = lerp_color(lerp_color(HY_SURFACE, HY_HIGH, selected), egui::Color32::from_rgb(0x12, 0x1C, 0x30), fade);
+    let edge = lerp_color(lerp_color(HY_BORDER, HY_ACCENT, selected), egui::Color32::from_rgb(0x2A, 0x3A, 0x52), fade);
     painter.rect_filled(rect, 1.5, fill);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0 + selected, edge), egui::StrokeKind::Inside);
+    if fade < 0.85 {
+        paint_corner_caps(painter, rect, edge);
+    }
 }
 
 fn red_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
     let hit = ui.interact(rect, egui::Id::new("red-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
-    let fill = if hit.hovered() { egui::Color32::from_rgb(214, 92, 98) } else { egui::Color32::from_rgb(196, 74, 82) };
+    let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
+    let fill = lerp_color(egui::Color32::from_rgb(196, 74, 82), egui::Color32::from_rgb(214, 92, 98), hot);
     ui.painter().rect_filled(rect, 1.5, fill);
     ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(232, 156, 156)), egui::StrokeKind::Inside);
     paint_corner_caps(ui.painter(), rect, egui::Color32::from_rgb(232, 156, 156));
@@ -4198,8 +4272,13 @@ fn red_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
 
 fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("opaque-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
-    let fill = if primary { HY_ACCENT } else { HY_HIGH };
-    let edge = if primary { HY_ACCENT } else { HY_BORDER };
+    let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
+    let fill = if primary {
+        lerp_color(HY_ACCENT, egui::Color32::from_rgb(0xFF, 0xC8, 0x6A), hot)
+    } else {
+        lerp_color(HY_HIGH, lerp_color(HY_HIGH, HY_TEXT, 0.14), hot)
+    };
+    let edge = if primary { fill } else { HY_BORDER };
     ui.painter().rect_filled(rect, 1.5, fill);
     ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), if primary { HY_BG } else { HY_TEXT });
@@ -4337,20 +4416,23 @@ fn classify_drop(path: &std::path::Path) -> u8 {
 
 fn spec_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("spec-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
+    let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
     if primary {
-        paint_hytale_bar(ui.painter(), rect);
-    } else if hit.hovered() {
-        ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(48, 78, 138, 236));
-        paint_open_frame(ui.painter(), rect);
+        let fill = lerp_color(HY_ACCENT, egui::Color32::from_rgb(0xFF, 0xC8, 0x6A), hot);
+        ui.painter().rect_filled(rect, 1.5, fill);
+        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, fill), egui::StrokeKind::Inside);
     } else {
-        paint_element_template(ui.painter(), rect);
+        let fill = lerp_color(HY_SURFACE, HY_HIGH, hot);
+        ui.painter().rect_filled(rect, 1.5, fill);
+        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
+        paint_corner_caps(ui.painter(), rect, HY_BORDER);
     }
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
         nav_font(13.0),
-        if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) },
+        if primary { HY_BG } else { HY_TEXT },
     );
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -4423,6 +4505,11 @@ fn rounded_inset(rect: egui::Rect, radius: f32, y0: f32, y1: f32) -> f32 {
     }
     let dy = radius - d;
     (radius - (radius * radius - dy * dy).max(0.0).sqrt()).max(0.0)
+}
+
+fn ease_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t) * (1.0 - t)
 }
 
 fn lerp_color(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
