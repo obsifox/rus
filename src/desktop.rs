@@ -149,6 +149,7 @@ struct Desktop {
     pack_tab: u8,
     row_focus: usize,
     confirm_remove: Option<String>,
+    confirm_instance: Option<String>,
     pending_pack: Option<std::path::PathBuf>,
     draft_open: bool,
     draft_name: String,
@@ -248,6 +249,7 @@ impl Desktop {
             pack_tab: 0,
             row_focus: 0,
             confirm_remove: None,
+            confirm_instance: None,
             pending_pack: None,
             draft_open: false,
             draft_name: String::new(),
@@ -473,6 +475,44 @@ impl Desktop {
         self.loader = next.to_string();
         self.remember_instance();
         self.save_settings();
+    }
+
+    /// On/off. One loader stays on. Forge and OptiFine may both stay on.
+    fn toggle_loader(&mut self, id: &str) {
+        let on = self.loader_active(id);
+        let next = match id {
+            "vanilla" => "vanilla",
+            "optifine" if on && self.loader == "forge+optifine" => "forge",
+            "optifine" if !on && (self.loader == "forge" || self.loader == "forge+optifine") => "forge+optifine",
+            "optifine" if on => "vanilla",
+            "optifine" => "optifine",
+            "forge" if on => "vanilla",
+            "forge" => "forge",
+            "fabric" | "neoforge" if on => "vanilla",
+            "fabric" | "neoforge" => id,
+            _ => return,
+        };
+        if self.loader == next {
+            return;
+        }
+        self.loader = next.to_string();
+        self.remember_instance();
+        self.save_settings();
+    }
+
+    fn delete_instance(&mut self, id: &str) {
+        let dir = crate::instances::dir(&self.app, id);
+        let _ = std::fs::remove_dir_all(&dir);
+        self.instances.retain(|inst| inst.id != id);
+        crate::instances::save(&self.app, &self.instances);
+        if self.instance_id == id {
+            if let Some(next) = self.instances.first().cloned() {
+                self.select_instance(&next.id);
+            } else {
+                self.instance_id.clear();
+            }
+        }
+        self.notice = "Instance deleted".into();
     }
 
     fn launch_selected(&mut self) {
@@ -817,6 +857,10 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
+        if self.tab == Tab::Versions {
+            // One color under every layer, 40% transparent, on the wallpaper.
+            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(36, 62, 112, 153));
+        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -840,6 +884,9 @@ impl Desktop {
         }
         if self.confirm_remove.is_some() {
             self.paint_remove_confirm(ui, full);
+        }
+        if self.confirm_instance.is_some() {
+            self.paint_instance_delete(ui, full);
         }
         if self.pending_pack.is_some() {
             self.paint_pack_prompt(ui, full);
@@ -1424,16 +1471,16 @@ impl Desktop {
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let content = spec_content(full);
-        paint_blend_stage(ui.painter(), content);
-        let left = egui::Rect::from_min_size(content.min, egui::vec2(360.0, content.height() - 72.0));
-        let right = egui::Rect::from_min_max(
-            egui::pos2(left.right() + 12.0, content.top()),
-            egui::pos2(content.right(), left.bottom()),
-        );
-        let foot = egui::Rect::from_min_max(
-            egui::pos2(content.left(), left.bottom() + 10.0),
-            content.right_bottom(),
-        );
+        let gap = 5.7;
+        let foot_h = 68.0;
+        let loader_w = 236.0;
+        let top_h = content.height() - foot_h - gap;
+        let left = egui::Rect::from_min_size(content.min, egui::vec2(content.width() - gap - loader_w, top_h));
+        let right = egui::Rect::from_min_size(egui::pos2(left.right() + gap, content.top()), egui::vec2(loader_w, top_h));
+        let foot = egui::Rect::from_min_size(egui::pos2(content.left(), left.bottom() + gap), egui::vec2(content.width(), foot_h));
+        paint_main_box(ui.painter(), left);
+        paint_main_box(ui.painter(), right);
+        paint_main_box(ui.painter(), foot);
         self.paint_instance_column(ui, left);
         self.paint_loader_column(ui, right);
         self.paint_instance_foot(ui, foot);
@@ -1454,21 +1501,21 @@ impl Desktop {
     }
 
     fn paint_instance_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
-        let head = egui::Rect::from_min_size(col.min, egui::vec2(col.width(), 36.0));
+        let head = egui::Rect::from_min_size(col.min + egui::vec2(10.0, 4.0), egui::vec2(col.width() - 20.0, 32.0));
         ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), GOLD);
         let count = format!("{}", self.instances.len());
         ui.painter().text(egui::pos2(head.left() + 92.0, head.center().y), egui::Align2::LEFT_CENTER, &count, sub_font(13.0), SPEC_TEXT);
-        let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 84.0, head.top() + 2.0), egui::vec2(84.0, 32.0));
-        if spec_button(ui, new_btn, "NEW", true) {
+        let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 72.0, head.top() + 1.0), egui::vec2(72.0, 28.0));
+        if opaque_button(ui, new_btn, "NEW", true) {
             self.draft_name.clear();
             self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
             self.draft_open = true;
         }
-        let list = egui::Rect::from_min_max(egui::pos2(col.left(), head.bottom() + 8.0), col.right_bottom());
+        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 3.0, head.bottom() + 4.0), egui::pos2(col.right() - 3.0, col.bottom() - 6.0));
         if self.instances.is_empty() {
-            let btn = egui::Rect::from_center_size(list.center(), egui::vec2(240.0, 44.0));
-            ui.painter().text(egui::pos2(list.center().x, list.center().y - 36.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), SPEC_MUTED);
-            if spec_button(ui, btn, "Create your first instance", true) {
+            let btn = egui::Rect::from_center_size(list.center(), egui::vec2(220.0, 36.0));
+            ui.painter().text(egui::pos2(list.center().x, list.center().y - 28.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), SPEC_MUTED);
+            if opaque_button(ui, btn, "Create instance", true) {
                 self.draft_open = true;
             }
             return;
@@ -1476,74 +1523,83 @@ impl Desktop {
         let rows: Vec<crate::instances::Instance> = self.instances.clone();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         child.set_clip_rect(list);
+        child.style_mut().spacing.window_margin = egui::Margin::ZERO;
+        child.style_mut().spacing.item_spacing.x = 0.0;
+        let mut pick: Option<String> = None;
+        let mut drop_id: Option<String> = None;
         egui::ScrollArea::vertical().id_salt("spec-instances").auto_shrink([false, false]).show(&mut child, |ui| {
             ui.set_width(list.width());
             for inst in &rows {
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), 64.0), Sense::click());
-                ui.add_space(8.0);
+                let (slot, _) = ui.allocate_exact_size(egui::vec2(list.width(), 58.0), Sense::hover());
+                ui.add_space(6.0);
+                let rect = slot;
                 let on = self.instance_id == inst.id;
-                spec_card(ui.painter(), rect, on);
-                let icon = egui::Rect::from_min_size(rect.min + egui::vec2(12.0, 14.0), egui::vec2(36.0, 36.0));
+                paint_opaque_card(ui.painter(), rect, on);
+                let icon = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 11.0), egui::vec2(36.0, 36.0));
                 if let Some(tex) = self.loader_icon_for(&inst.loader) {
                     ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
-                let name = ellipsize(ui.painter(), &inst.name, title_font(16.0), rect.width() - 92.0);
-                ui.painter().text(egui::pos2(icon.right() + 12.0, rect.top() + 22.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), if on { SPEC_YELLOW } else { SPEC_TEXT });
+                let select = egui::Rect::from_min_size(egui::pos2(rect.right() - 138.0, rect.top() + 14.0), egui::vec2(68.0, 30.0));
+                let delete = egui::Rect::from_min_size(egui::pos2(rect.right() - 64.0, rect.top() + 14.0), egui::vec2(54.0, 30.0));
+                let name = ellipsize(ui.painter(), &inst.name, title_font(16.0), select.left() - icon.right() - 20.0);
+                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 20.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), if on { GOLD } else { SPEC_TEXT });
                 let sub = format!("{} · {}", inst.version, crate::state::loader_label(&inst.loader));
-                ui.painter().text(egui::pos2(icon.right() + 12.0, rect.top() + 42.0), egui::Align2::LEFT_CENTER, &sub, sub_font(13.0), SPEC_MUTED);
-                if on {
-                    ui.painter().circle_filled(egui::pos2(rect.right() - 16.0, rect.center().y), 4.5, SPEC_GREEN);
+                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 38.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &sub, sub_font(13.0), select.left() - icon.right() - 20.0), sub_font(13.0), SPEC_MUTED);
+                if opaque_button(ui, select, if on { "Selected" } else { "Select" }, on) {
+                    pick = Some(inst.id.clone());
                 }
-                if resp.clicked() {
-                    self.select_instance(&inst.id);
-                }
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                if opaque_button(ui, delete, "Delete", false) {
+                    drop_id = Some(inst.id.clone());
                 }
             }
         });
+        if let Some(id) = pick {
+            self.select_instance(&id);
+        }
+        if let Some(id) = drop_id {
+            self.confirm_instance = Some(id);
+        }
     }
 
     fn paint_loader_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
-        let head = egui::Rect::from_min_size(col.min, egui::vec2(col.width(), 36.0));
+        let head = egui::Rect::from_min_size(col.min + egui::vec2(8.0, 4.0), egui::vec2(col.width() - 16.0, 32.0));
         ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), GOLD);
-        let for_mc = format!("for Minecraft {}", if self.selected.is_empty() { "26.3" } else { self.selected.as_str() });
-        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &for_mc, sub_font(13.0), SPEC_YELLOW);
-        let list = egui::Rect::from_min_max(egui::pos2(col.left(), head.bottom() + 8.0), col.right_bottom());
-        let mc = self.selected.clone();
+        let mc = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &mc, sub_font(12.0), GOLD);
+        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 3.0, head.bottom() + 2.0), egui::pos2(col.right() - 3.0, col.bottom() - 6.0));
         let rows = crate::loaders::rows_for(&mc, &self.loaders);
         if !self.loaders.ready && rows.iter().all(|r| r.id == "vanilla" || r.version.is_empty()) {
             for i in 0..5 {
-                let y = list.top() + i as f32 * 52.0;
-                let row = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 44.0));
-                ui.painter().rect_filled(row, 5.0, SPEC_ITEM);
+                let y = list.top() + i as f32 * 48.0;
+                let row = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 42.0));
+                ui.painter().rect_filled(row, 1.5, egui::Color32::from_rgb(28, 46, 84));
             }
             return;
         }
         let mut clicked: Option<String> = None;
         for (i, row) in rows.iter().enumerate() {
-            let y = list.top() + i as f32 * 52.0;
-            let rect = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 44.0));
+            let y = list.top() + i as f32 * 48.0;
+            let rect = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 42.0));
             let missing = matches!(row.kind, crate::loaders::Badge::Preview) && row.version.is_empty();
             let on = self.loader_active(row.id);
             if missing {
-                ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(20, 34, 62, 150));
-                paint_dashed_rect(ui.painter(), rect, egui::Color32::from_rgb(176, 196, 214));
+                ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgb(72, 76, 84));
+                ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 124, 132)), egui::StrokeKind::Inside);
             } else {
-                spec_card(ui.painter(), rect, on);
+                paint_opaque_card(ui.painter(), rect, on);
             }
-            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), egui::vec2(28.0, 28.0));
-            if let Some(tex) = self.loader_icon_id(row.id) {
-                ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            let tick = egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.center().y), egui::vec2(16.0, 16.0));
+            paint_check(ui.painter(), tick, on && !missing);
+            if missing {
+                paint_warn(ui.painter(), egui::pos2(tick.right() + 12.0, rect.center().y));
             }
-            let ink = if missing { SPEC_MUTED } else if on { SPEC_YELLOW } else { SPEC_TEXT };
-            ui.painter().text(egui::pos2(rect.left() + 48.0, rect.center().y), egui::Align2::LEFT_CENTER, row.name, title_font(16.0), ink);
+            let text_x = if missing { tick.right() + 24.0 } else { tick.right() + 10.0 };
+            let ink = if missing { egui::Color32::from_rgb(168, 172, 178) } else if on { GOLD } else { SPEC_TEXT };
             let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
-            ui.painter().text(egui::pos2(rect.left() + 168.0, rect.center().y), egui::Align2::LEFT_CENTER, &detail, body_font(13.0), SPEC_MUTED);
-            let badge_ink = if matches!(row.kind, crate::loaders::Badge::Preview) { SPEC_YELLOW } else { SPEC_GREEN };
-            ui.painter().text(egui::pos2(rect.right() - 14.0, rect.center().y), egui::Align2::RIGHT_CENTER, row.badge, nav_font(11.0), badge_ink);
+            ui.painter().text(egui::pos2(text_x, rect.top() + 15.0), egui::Align2::LEFT_CENTER, row.name, title_font(14.0), ink);
+            ui.painter().text(egui::pos2(text_x, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), rect.right() - text_x - 8.0), sub_font(11.0), if missing { egui::Color32::from_rgb(150, 154, 160) } else { SPEC_MUTED });
             if !missing {
-                let hit = ui.interact(rect, egui::Id::new("spec-loader").with(row.id), Sense::click());
+                let hit = ui.interact(tick.expand(6.0), egui::Id::new("loader-toggle").with(row.id), Sense::click());
                 if hit.clicked() {
                     clicked = Some(row.id.to_string());
                 }
@@ -1553,32 +1609,56 @@ impl Desktop {
             }
         }
         if let Some(id) = clicked {
-            self.choose_loader(&id);
+            self.toggle_loader(&id);
         }
     }
 
     fn paint_instance_foot(&mut self, ui: &mut egui::Ui, foot: egui::Rect) {
-        ui.painter().rect_filled(foot, 5.0, SPEC_PANEL);
-        ui.painter().rect_stroke(foot, 5.0, egui::Stroke::new(1.0, SPEC_EDGE), egui::StrokeKind::Inside);
         let name = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| "None".into());
         let mc = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
         let rows = crate::loaders::rows_for(&mc, &self.loaders);
-        let active = rows.iter().find(|r| self.loader_active(r.id)).cloned();
-        let loader = active.as_ref().map(|r| r.name).unwrap_or("Vanilla");
-        let ver = active.as_ref().map(|r| r.version.as_str()).unwrap_or("");
-        let line = format!("{name} · {loader} {ver} · {mc}");
-        ui.painter().text(egui::pos2(foot.left() + 16.0, foot.center().y), egui::Align2::LEFT_CENTER, &line, body_font(15.0), SPEC_TEXT);
-        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 196.0, foot.top() + 10.0), egui::vec2(180.0, foot.height() - 20.0));
-        let raw = self.install_label(active.as_ref());
-        let (label, primary, enabled) = if raw == "INSTALL" {
-            ("INSTALL LOADER", true, true)
-        } else if raw == "INSTALLED" {
-            ("USE", false, false)
+        let chosen: Vec<_> = rows.iter().filter(|r| self.loader_active(r.id)).cloned().collect();
+        let plan = if chosen.is_empty() {
+            format!("Nothing selected on {name}")
         } else {
-            ("UNAVAILABLE", false, false)
+            let parts: Vec<String> = chosen.iter().map(|r| if r.version.is_empty() { r.name.to_string() } else { format!("{} {}", r.name, r.version) }).collect();
+            format!("{} on {name} · Minecraft {mc}", parts.join(" + "))
         };
-        if spec_button(ui, btn, label, primary) && enabled {
+        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 18.0), egui::Align2::LEFT_CENTER, "WILL INSTALL", nav_font(11.0), GOLD);
+        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 40.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &plan, body_font(15.0), foot.width() - 210.0), body_font(15.0), SPEC_TEXT);
+        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 168.0, foot.top() + 16.0), egui::vec2(152.0, 36.0));
+        let active = chosen.iter().find(|r| r.id != "optifine").cloned();
+        let raw = self.install_label(active.as_ref());
+        let (label, enabled) = if raw == "INSTALL" {
+            ("INSTALL", true)
+        } else if raw == "INSTALLED" {
+            ("INSTALLED", false)
+        } else {
+            ("UNAVAILABLE", false)
+        };
+        if opaque_button(ui, btn, label, enabled) && enabled {
             self.on_install();
+        }
+    }
+
+    fn paint_instance_delete(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let Some(id) = self.confirm_instance.clone() else { return };
+        let name = self.instances.iter().find(|i| i.id == id).map(|i| i.name.clone()).unwrap_or_else(|| "Instance".into());
+        let dir = crate::instances::dir(&self.app, &id);
+        let files = count_files(&dir);
+        ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(120));
+        let box_rect = egui::Rect::from_center_size(full.center(), egui::vec2(440.0, 168.0));
+        paint_main_box(ui.painter(), box_rect);
+        ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.top() + 28.0), egui::Align2::LEFT_CENTER, "Delete this instance?", title_font(16.0), SPEC_TEXT);
+        ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.top() + 56.0), egui::Align2::LEFT_CENTER, &format!("{name} · {files} files"), body_font(14.0), SPEC_MUTED);
+        let cancel = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 220.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 34.0));
+        let ok = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 112.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 34.0));
+        if opaque_button(ui, cancel, "Cancel", false) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.confirm_instance = None;
+        }
+        if opaque_button(ui, ok, "Delete", true) || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            self.delete_instance(&id);
+            self.confirm_instance = None;
         }
     }
 
@@ -4066,6 +4146,54 @@ fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) 
 /// Same two install colors, blended top to bottom instead of a hard split.
 fn spec_content(full: egui::Rect) -> egui::Rect {
     egui::Rect::from_min_max(egui::pos2(16.0, 64.0), egui::pos2(full.right() - 16.0, full.bottom() - 12.0))
+}
+
+fn paint_main_box(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 1.5, egui::Color32::from_rgb(36, 62, 112));
+    paint_open_frame(painter, rect);
+}
+
+fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
+    let fill = if selected { egui::Color32::from_rgb(48, 78, 138) } else { egui::Color32::from_rgb(22, 38, 70) };
+    let edge = if selected { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    painter.rect_filled(rect, 1.5, fill);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
+    paint_corner_caps(painter, rect, edge);
+}
+
+fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("opaque-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
+    let fill = if primary { egui::Color32::from_rgb(48, 78, 138) } else { egui::Color32::from_rgb(22, 38, 70) };
+    let edge = if primary { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    ui.painter().rect_filled(rect, 1.5, fill);
+    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) });
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+fn paint_warn(painter: &egui::Painter, center: egui::Pos2) {
+    let a = center + egui::vec2(0.0, -7.0);
+    let b = center + egui::vec2(-6.5, 6.0);
+    let c = center + egui::vec2(6.5, 6.0);
+    painter.add(egui::Shape::convex_polygon(vec![a, c, b], egui::Color32::from_rgb(36, 62, 112), egui::Stroke::new(1.4, GOLD)));
+    painter.text(center + egui::vec2(0.0, 1.5), egui::Align2::CENTER_CENTER, "!", nav_font(10.0), GOLD);
+}
+
+fn count_files(path: &std::path::Path) -> usize {
+    let mut n = 0usize;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() { stack.push(p); } else { n += 1; }
+            if n > 4000 { return n; }
+        }
+    }
+    n
 }
 
 fn paint_blend_stage(painter: &egui::Painter, rect: egui::Rect) {
