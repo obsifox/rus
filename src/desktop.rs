@@ -3244,10 +3244,74 @@ fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
     paint_corner_caps(painter, rect, edge);
 }
 
-/// Version-page element: corner design only. No fill and no full stroke.
+/// Version-page element: castle corners only. No fill and no full stroke.
 fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
-    let color = if on { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
-    paint_corner_caps(painter, rect, color);
+    let stone = if on {
+        egui::Color32::from_rgb(244, 202, 84)
+    } else {
+        egui::Color32::from_rgb(232, 222, 196)
+    };
+    let course = if on {
+        egui::Color32::from_rgb(176, 132, 48)
+    } else {
+        egui::Color32::from_rgb(154, 140, 112)
+    };
+    let m = rect.width().min(rect.height());
+    // Small chips keep a short turret so the label stays clear.
+    let (tower, tooth, count) = if m < 32.0 {
+        (5.0, 3.0, 1)
+    } else {
+        (7.0, 3.0, 2)
+    };
+    let corners = [
+        (rect.left().round(), rect.top().round(), 1.0, 1.0),
+        ((rect.right() - 1.0).round(), rect.top().round(), -1.0, 1.0),
+        (rect.left().round(), (rect.bottom() - 1.0).round(), 1.0, -1.0),
+        ((rect.right() - 1.0).round(), (rect.bottom() - 1.0).round(), -1.0, -1.0),
+    ];
+    for (x, y, sx, sy) in corners {
+        paint_castle_corner(painter, x, y, sx, sy, tower, tooth, count, stone, course);
+    }
+}
+
+fn paint_castle_corner(
+    painter: &egui::Painter,
+    x: f32,
+    y: f32,
+    sx: f32,
+    sy: f32,
+    tower: f32,
+    tooth: f32,
+    count: i32,
+    stone: egui::Color32,
+    course: egui::Color32,
+) {
+    let gap = 2.0;
+    let thick = 2.0;
+    let span = count as f32 * tooth + (count - 1).max(0) as f32 * gap;
+    let map = |lx: f32, ly: f32, lw: f32, lh: f32| {
+        let x0 = (x + sx * lx).round();
+        let y0 = (y + sy * ly).round();
+        let x1 = (x + sx * (lx + lw)).round();
+        let y1 = (y + sy * (ly + lh)).round();
+        egui::Rect::from_min_max(egui::pos2(x0.min(x1), y0.min(y1)), egui::pos2(x0.max(x1), y0.max(y1)))
+    };
+    let fill = |lx: f32, ly: f32, lw: f32, lh: f32, color: egui::Color32| {
+        let block = map(lx, ly, lw, lh);
+        if block.width() >= 1.0 && block.height() >= 1.0 {
+            painter.rect_filled(block, 0.0, color);
+        }
+    };
+    // Corner turret, then a crenellated curtain wall on each arm.
+    fill(0.0, 0.0, tower, tower, stone);
+    fill(1.0, 1.0, tower - 2.0, 1.0, course);
+    for i in 0..count {
+        let at = tower + gap + i as f32 * (tooth + gap);
+        fill(at, 0.0, tooth, tooth, stone);
+        fill(0.0, at, tooth, tooth, stone);
+    }
+    fill(tower, tooth, span + gap, thick, course);
+    fill(tooth, tower, thick, span + gap, course);
 }
 
 /// One element, one template. Slightly open so the wallpaper still shows through.
