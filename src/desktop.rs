@@ -480,17 +480,18 @@ impl Desktop {
     /// On/off. One loader stays on. Forge and OptiFine may both stay on.
     fn toggle_loader(&mut self, id: &str) {
         let on = self.loader_active(id);
-        let next = match id {
-            "vanilla" => "vanilla",
-            "optifine" if on && self.loader == "forge+optifine" => "forge",
-            "optifine" if !on && (self.loader == "forge" || self.loader == "forge+optifine") => "forge+optifine",
-            "optifine" if on => "vanilla",
-            "optifine" => "optifine",
-            "forge" if on => "vanilla",
-            "forge" => "forge",
-            "fabric" | "neoforge" if on => "vanilla",
-            "fabric" | "neoforge" => id,
-            _ => return,
+        let next = if on {
+            match (id, self.loader.as_str()) {
+                ("optifine", "forge+optifine") => "forge",
+                ("forge", "forge+optifine") => "optifine",
+                _ => "",
+            }
+        } else if id == "optifine" && (self.loader == "forge" || self.loader == "forge+optifine") {
+            "forge+optifine"
+        } else if id == "forge" && self.loader == "optifine" {
+            "forge+optifine"
+        } else {
+            id
         };
         if self.loader == next {
             return;
@@ -1471,7 +1472,7 @@ impl Desktop {
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let content = spec_content(full);
-        let gap = 5.7;
+        let gap = 10.0;
         let foot_h = 68.0;
         let loader_w = 236.0;
         let top_h = content.height() - foot_h - gap;
@@ -1548,7 +1549,7 @@ impl Desktop {
                 if opaque_button(ui, select, if on { "Selected" } else { "Select" }, on) {
                     pick = Some(inst.id.clone());
                 }
-                if opaque_button(ui, delete, "Delete", false) {
+                if red_button(ui, delete, "Delete") {
                     drop_id = Some(inst.id.clone());
                 }
             }
@@ -1588,18 +1589,33 @@ impl Desktop {
             } else {
                 paint_opaque_card(ui.painter(), rect, on);
             }
-            let tick = egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.center().y), egui::vec2(16.0, 16.0));
-            paint_check(ui.painter(), tick, on && !missing);
+            let tick = egui::Rect::from_min_size(egui::pos2(rect.right() - 30.0, rect.center().y - 11.0), egui::vec2(22.0, 22.0));
+            let warn = egui::Rect::from_min_size(egui::pos2(tick.left() - 4.0 - 22.0, tick.top()), egui::vec2(22.0, 22.0));
             if missing {
-                paint_warn(ui.painter(), egui::pos2(tick.right() + 12.0, rect.center().y));
+                ui.painter().rect_filled(warn, 1.5, egui::Color32::from_rgb(72, 76, 84));
+                ui.painter().rect_stroke(warn, 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
+                paint_warn(ui.painter(), warn.center());
             }
-            let text_x = if missing { tick.right() + 24.0 } else { tick.right() + 10.0 };
+            let tick_fill = if missing {
+                egui::Color32::from_rgb(90, 94, 100)
+            } else if on {
+                egui::Color32::from_rgb(48, 78, 138)
+            } else {
+                egui::Color32::from_rgb(22, 38, 70)
+            };
+            let tick_edge = if on && !missing { GOLD } else if missing { egui::Color32::from_rgb(140, 144, 150) } else { egui::Color32::from_rgb(196, 214, 232) };
+            ui.painter().rect_filled(tick, 1.5, tick_fill);
+            ui.painter().rect_stroke(tick, 1.5, egui::Stroke::new(1.0, tick_edge), egui::StrokeKind::Inside);
+            if on && !missing {
+                paint_check(ui.painter(), tick.shrink(3.0), true);
+            }
+            let text_right = if missing { warn.left() - 8.0 } else { tick.left() - 8.0 };
             let ink = if missing { egui::Color32::from_rgb(168, 172, 178) } else if on { GOLD } else { SPEC_TEXT };
             let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
-            ui.painter().text(egui::pos2(text_x, rect.top() + 15.0), egui::Align2::LEFT_CENTER, row.name, title_font(14.0), ink);
-            ui.painter().text(egui::pos2(text_x, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), rect.right() - text_x - 8.0), sub_font(11.0), if missing { egui::Color32::from_rgb(150, 154, 160) } else { SPEC_MUTED });
+            ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 15.0), egui::Align2::LEFT_CENTER, row.name, title_font(14.0), ink);
+            ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), text_right - rect.left() - 12.0), sub_font(11.0), if missing { egui::Color32::from_rgb(150, 154, 160) } else { SPEC_MUTED });
             if !missing {
-                let hit = ui.interact(tick.expand(6.0), egui::Id::new("loader-toggle").with(row.id), Sense::click());
+                let hit = ui.interact(tick, egui::Id::new("loader-toggle").with(row.id), Sense::click());
                 if hit.clicked() {
                     clicked = Some(row.id.to_string());
                 }
@@ -1656,7 +1672,7 @@ impl Desktop {
         if opaque_button(ui, cancel, "Cancel", false) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.confirm_instance = None;
         }
-        if opaque_button(ui, ok, "Delete", true) || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        if red_button(ui, ok, "Delete") || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             self.delete_instance(&id);
             self.confirm_instance = None;
         }
@@ -4159,6 +4175,19 @@ fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) 
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
+}
+
+fn red_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("red-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
+    let fill = if hit.hovered() { egui::Color32::from_rgb(214, 92, 98) } else { egui::Color32::from_rgb(196, 74, 82) };
+    ui.painter().rect_filled(rect, 1.5, fill);
+    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(232, 156, 156)), egui::StrokeKind::Inside);
+    paint_corner_caps(ui.painter(), rect, egui::Color32::from_rgb(232, 156, 156));
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), egui::Color32::from_rgb(255, 244, 242));
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
 }
 
 fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
