@@ -18,8 +18,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 const REPO: &str = "obsifox/rus";
-const WINDOW_W: f32 = 450.0;
-const WINDOW_H: f32 = 740.0;
+const WINDOW_W: f32 = 420.0;
+const WINDOW_H: f32 = 746.0;
 
 const BG: egui::Color32 = egui::Color32::from_rgb(0x16, 0x26, 0x5A);
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x10, 0x19, 0x40);
@@ -101,14 +101,16 @@ struct Gate {
     total: u64,
     working: bool,
     rx: Option<Receiver<Msg>>,
-    logo: Option<egui::TextureHandle>,
+    install_art: Option<egui::TextureHandle>,
+    update_art: Option<egui::TextureHandle>,
 }
 
 impl Gate {
     fn new(cc: &eframe::CreationContext<'_>, shot: Option<String>) -> Self {
         install_font(&cc.egui_ctx);
         style_ui(&cc.egui_ctx);
-        let logo = load_logo(&cc.egui_ctx);
+        let install_art = load_art(&cc.egui_ctx, "gate-install", include_bytes!("../../assets/gate-install.jpg"));
+        let update_art = load_art(&cc.egui_ctx, "gate-update", include_bytes!("../../assets/gate-update.jpg"));
         let launch = shot.is_none() && (daily_launcher() || install_dir().is_some());
         let preview = shot.is_some();
         let preview_update = preview && std::env::var("RUS_GATE_PREVIEW").ok().as_deref() == Some("update");
@@ -118,11 +120,9 @@ impl Gate {
             frames: 0,
             mode: if launch || preview_update { Mode::Launch } else { Mode::Install },
             path: if preview {
-                "C:".into()
+                r"C:\Users\Player\AppData\Local\Programs\Rus".into()
             } else {
-                install_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(default_install_dir)
+                default_install_dir()
             },
             status: if preview_update { "Checking update".into() } else { String::new() },
             error: String::new(),
@@ -130,7 +130,8 @@ impl Gate {
             total: if preview_update { 100 } else { 0 },
             working: false,
             rx: None,
-            logo,
+            install_art,
+            update_art,
         };
         if launch {
             if let Some(dir) = install_dir() {
@@ -143,9 +144,10 @@ impl Gate {
     }
 
     fn start_install(&mut self) {
-        let path = self.path.trim().to_string();
-        if path.is_empty() {
-            self.error = "Choose a folder.".into();
+        let path = default_install_dir();
+        self.path = path.clone();
+        if path.trim().is_empty() {
+            self.error = "No install folder is available.".into();
             return;
         }
         self.error.clear();
@@ -240,60 +242,48 @@ impl eframe::App for Gate {
 
 impl Gate {
     fn paint(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let art = if matches!(self.mode, Mode::Install) && !self.working {
+            self.install_art.as_ref()
+        } else {
+            self.update_art.as_ref()
+        };
+        if let Some(art) = art {
+            paint_cover(ui.painter(), art, full);
+        }
+        paint_bottom_shade(ui.painter(), full);
         paint_exit(ui, full);
-        self.paint_logo(ui, full);
         match self.mode {
             Mode::Install if !self.working => self.paint_form(ui, full),
             _ => self.paint_status(ui, full),
         }
     }
 
-    fn paint_logo(&self, ui: &mut egui::Ui, full: egui::Rect) {
-        let Some(logo) = &self.logo else { return };
-        let size = logo.size();
-        let aspect = if size[1] == 0 { 1080.0 / 481.0 } else { size[0] as f32 / size[1] as f32 };
-        let w = (full.width() - 72.0).min(380.0);
-        let h = w / aspect;
-        let rect = egui::Rect::from_min_size(egui::pos2(full.center().x - w * 0.5, full.top() + 36.0), egui::vec2(w, h));
-        ui.painter().image(logo.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-    }
-
     fn paint_form(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let label = "Install Directory :";
-        let label_font = body_font(20.0);
-        let label_y = full.top() + full.height() * 0.47;
-        ui.painter().text(egui::pos2(full.center().x, label_y), egui::Align2::CENTER_CENTER, label, label_font, TEXT);
-        let field = egui::Rect::from_min_size(egui::pos2(full.left() + 36.0, label_y + 28.0), egui::vec2(full.width() - 72.0, 46.0));
-        ui.painter().rect_filled(field, 10.0, SURFACE);
-        let browse = egui::Rect::from_min_size(egui::pos2(field.right() - 40.0, field.top()), egui::vec2(40.0, field.height()));
-        let browse_hit = ui.interact(browse, egui::Id::new("gate-browse"), Sense::click());
-        let inner = egui::Rect::from_min_max(field.left_top() + egui::vec2(14.0, 8.0), egui::pos2(browse.left() - 4.0, field.bottom() - 8.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        child.set_clip_rect(inner);
-        clear_field_chrome(&mut child);
-        child.style_mut().text_styles.insert(egui::TextStyle::Body, body_font(16.0));
-        child.add(
-            egui::TextEdit::singleline(&mut self.path)
-                .desired_width(inner.width())
-                .font(egui::TextStyle::Body)
-                .frame(false)
-                .margin(egui::vec2(0.0, 4.0)),
+        let path = fit_middle(ui, &self.path, body_font(14.0), full.width() - 56.0);
+        ui.painter().text(
+            egui::pos2(full.center().x, full.bottom() - 132.0),
+            egui::Align2::CENTER_CENTER,
+            "Install directory",
+            body_font(15.0),
+            TEXT,
         );
-        if browse_hit.hovered() {
-            ui.painter().text(browse.center(), egui::Align2::CENTER_CENTER, "…", title_font(18.0), YELLOW);
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-        }
-        if browse_hit.clicked() {
-            if let Some(path) = pick_folder() {
-                self.path = path.display().to_string();
-                self.error.clear();
-            }
-        }
+        ui.painter().text(
+            egui::pos2(full.center().x, full.bottom() - 108.0),
+            egui::Align2::CENTER_CENTER,
+            &path,
+            body_font(14.0),
+            TEXT,
+        );
         if !self.error.is_empty() {
-            let note = ellipsize(&self.error, 42);
-            ui.painter().text(egui::pos2(field.left(), field.bottom() + 16.0), egui::Align2::LEFT_CENTER, &note, body_font(13.0), WARN);
+            ui.painter().text(
+                egui::pos2(full.center().x, full.bottom() - 86.0),
+                egui::Align2::CENTER_CENTER,
+                &ellipsize(&self.error, 42),
+                body_font(12.0),
+                WARN,
+            );
         }
-        let install = egui::Rect::from_min_size(egui::pos2(field.right() - 148.0, field.bottom() + 28.0), egui::vec2(148.0, 46.0));
+        let install = egui::Rect::from_center_size(egui::pos2(full.center().x, full.bottom() - 52.0), egui::vec2(148.0, 42.0));
         if gold_button(ui, install, "Install") {
             self.start_install();
         }
@@ -1062,11 +1052,58 @@ fn paint_exit(ui: &mut egui::Ui, full: egui::Rect) {
     }
 }
 
-fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let img = image::load_from_memory(include_bytes!("../../assets/rus-logo-title.png")).ok()?.to_rgba8();
+fn load_art(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    Some(ctx.load_texture("gate-logo", color, egui::TextureOptions::LINEAR))
+    Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+}
+
+fn paint_cover(painter: &egui::Painter, tex: &egui::TextureHandle, full: egui::Rect) {
+    let size = tex.size();
+    let aspect = if size[1] == 0 { 840.0 / 1492.0 } else { size[0] as f32 / size[1] as f32 };
+    let window = full.width() / full.height().max(1.0);
+    let (w, h) = if window > aspect {
+        (full.width(), full.width() / aspect)
+    } else {
+        (full.height() * aspect, full.height())
+    };
+    let rect = egui::Rect::from_center_size(full.center(), egui::vec2(w, h));
+    painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+}
+
+fn paint_bottom_shade(painter: &egui::Painter, full: egui::Rect) {
+    let h = 168.0;
+    let top = full.bottom() - h;
+    let mut y = top;
+    while y < full.bottom() {
+        let t = ((y - top) / h).clamp(0.0, 1.0);
+        let alpha = (t * t * 110.0) as u8;
+        painter.hline(full.x_range(), y, egui::Stroke::new(1.15, egui::Color32::from_black_alpha(alpha)));
+        y += 1.0;
+    }
+}
+
+fn fit_middle(ui: &egui::Ui, text: &str, font: egui::FontId, max_w: f32) -> String {
+    let width = |s: &str| ui.painter().layout_no_wrap(s.to_string(), font.clone(), TEXT).size().x;
+    if width(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() < 8 {
+        return ellipsize(text, 8);
+    }
+    let mut keep = chars.len() / 2;
+    while keep > 4 {
+        let head: String = chars.iter().take(keep).collect();
+        let tail: String = chars.iter().skip(chars.len() - keep).collect();
+        let shown = format!("{head}…{tail}");
+        if width(&shown) <= max_w {
+            return shown;
+        }
+        keep -= 1;
+    }
+    ellipsize(text, 24)
 }
 
 fn save_png(path: &str, image: &egui::ColorImage) -> Result<(), String> {
