@@ -127,17 +127,18 @@ The release is Rus Gate. Download it once.
 
 | Platform | File |
 | --- | --- |
-| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.03/rus-gate.exe) |
+| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.04/rus-gate.exe) |
 
 <p align="center">
-  <img src="docs/gate.png" alt="Rus Gate, a solid-color install window" width="640">
+  <img src="docs/gate.png" alt="Rus Gate, a vertical install window" width="280">
+  <img src="docs/gate-update.png" alt="Rus Gate checking for an update" width="280">
 </p>
 
-Run `rus-gate.exe`. The window is one solid color, with no title bar. It asks where to install, then does not ask again. The folder is saved in the registry (`HKCU\Software\Rus`). The folder receives `rus-gate.exe` and `Rus Launcher.exe`.
+Run `rus-gate.exe`. The window is vertical and one solid color, with no title bar. The mark sits at the top. It asks where to install once, then does not ask again. The folder is saved in the registry (`HKCU\Software\Rus`). The folder receives `rus-gate.exe` and `Rus Launcher.exe`.
 
 `Rus Launcher.exe` does not show the install step. With a connection it reads **tags**, not the release list, downloads `rus_{version}.exe` from that tag's release, and starts it. With no connection it starts the installed build.
 
-Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.03`.
+Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.04`.
 
 Linux builds from source with `cargo build --release`. The published release is the Windows gate.
 
