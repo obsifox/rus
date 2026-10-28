@@ -33,7 +33,7 @@
 <br>
 
 <p align="center">
-  <img src="docs/home.png" alt="Rus home: collection wallpaper, glass navigation, and a blue Play button" width="100%">
+  <img src="docs/home.png" alt="Rus home: collection wallpaper, gold navigation, and Play on the art" width="100%">
   <br><sub><b>Home.</b> The selected version’s official wallpaper fills the window. Play sits on the art.</sub>
 </p>
 
