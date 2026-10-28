@@ -1512,7 +1512,7 @@ impl Desktop {
             self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
             self.draft_open = true;
         }
-        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 3.0, head.bottom() + 4.0), egui::pos2(col.right() - 3.0, col.bottom() - 6.0));
+        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 8.0, head.bottom() + 4.0), egui::pos2(col.right() - 8.0, col.bottom() - 6.0));
         if self.instances.is_empty() {
             let btn = egui::Rect::from_center_size(list.center(), egui::vec2(220.0, 36.0));
             ui.painter().text(egui::pos2(list.center().x, list.center().y - 28.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), SPEC_MUTED);
@@ -1577,52 +1577,49 @@ impl Desktop {
             }
             return;
         }
+        let forge_on = self.loader == "forge" || self.loader == "forge+optifine";
+        let any_on = rows.iter().any(|r| self.loader_active(r.id));
         let mut clicked: Option<String> = None;
         for (i, row) in rows.iter().enumerate() {
             let y = list.top() + i as f32 * 48.0;
             let rect = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 42.0));
             let missing = matches!(row.kind, crate::loaders::Badge::Preview) && row.version.is_empty();
             let on = self.loader_active(row.id);
-            if missing {
+            let pair = row.id == "optifine" && forge_on && !on;
+            let fade = any_on && !on && !pair && !missing;
+            if pair {
+                paint_purple_card(ui.painter(), rect);
+            } else if missing {
                 ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgb(72, 76, 84));
                 ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 124, 132)), egui::StrokeKind::Inside);
+            } else if fade {
+                paint_faded_card(ui.painter(), rect);
             } else {
                 paint_opaque_card(ui.painter(), rect, on);
             }
-            let tick = egui::Rect::from_min_size(egui::pos2(rect.right() - 30.0, rect.center().y - 11.0), egui::vec2(22.0, 22.0));
-            let warn = egui::Rect::from_min_size(egui::pos2(tick.left() - 4.0 - 22.0, tick.top()), egui::vec2(22.0, 22.0));
+            let switch = egui::Rect::from_min_size(egui::pos2(rect.right() - 46.0, rect.center().y - 9.0), egui::vec2(36.0, 18.0));
+            let warn = egui::Rect::from_min_size(egui::pos2(switch.left() - 4.0 - 18.0, rect.center().y - 9.0), egui::vec2(18.0, 18.0));
             if missing {
-                ui.painter().rect_filled(warn, 1.5, egui::Color32::from_rgb(72, 76, 84));
-                ui.painter().rect_stroke(warn, 1.5, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
                 paint_warn(ui.painter(), warn.center());
             }
-            let tick_fill = if missing {
-                egui::Color32::from_rgb(90, 94, 100)
+            let can_switch = !missing || pair;
+            if paint_slide_switch(ui, switch, on && can_switch, egui::Id::new("loader-slide").with(row.id), can_switch) {
+                clicked = Some(row.id.to_string());
+            }
+            let text_right = if missing { warn.left() - 8.0 } else { switch.left() - 8.0 };
+            let ink = if pair {
+                egui::Color32::from_rgb(232, 210, 255)
+            } else if missing || fade {
+                egui::Color32::from_rgb(150, 154, 160)
             } else if on {
-                egui::Color32::from_rgb(48, 78, 138)
+                GOLD
             } else {
-                egui::Color32::from_rgb(22, 38, 70)
+                SPEC_TEXT
             };
-            let tick_edge = if on && !missing { GOLD } else if missing { egui::Color32::from_rgb(140, 144, 150) } else { egui::Color32::from_rgb(196, 214, 232) };
-            ui.painter().rect_filled(tick, 1.5, tick_fill);
-            ui.painter().rect_stroke(tick, 1.5, egui::Stroke::new(1.0, tick_edge), egui::StrokeKind::Inside);
-            if on && !missing {
-                paint_check(ui.painter(), tick.shrink(3.0), true);
-            }
-            let text_right = if missing { warn.left() - 8.0 } else { tick.left() - 8.0 };
-            let ink = if missing { egui::Color32::from_rgb(168, 172, 178) } else if on { GOLD } else { SPEC_TEXT };
             let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
+            let detail_ink = if missing || fade { egui::Color32::from_rgb(128, 132, 140) } else if pair { egui::Color32::from_rgb(196, 170, 230) } else { SPEC_MUTED };
             ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 15.0), egui::Align2::LEFT_CENTER, row.name, title_font(14.0), ink);
-            ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), text_right - rect.left() - 12.0), sub_font(11.0), if missing { egui::Color32::from_rgb(150, 154, 160) } else { SPEC_MUTED });
-            if !missing {
-                let hit = ui.interact(tick, egui::Id::new("loader-toggle").with(row.id), Sense::click());
-                if hit.clicked() {
-                    clicked = Some(row.id.to_string());
-                }
-                if hit.hovered() {
-                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                }
-            }
+            ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), (text_right - rect.left() - 12.0).max(24.0)), sub_font(11.0), detail_ink);
         }
         if let Some(id) = clicked {
             self.toggle_loader(&id);
@@ -4197,6 +4194,41 @@ fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool
     ui.painter().rect_filled(rect, 1.5, fill);
     ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) });
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+fn paint_faded_card(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 1.5, egui::Color32::from_rgb(58, 62, 70));
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 100, 108)), egui::StrokeKind::Inside);
+}
+
+fn paint_purple_card(painter: &egui::Painter, rect: egui::Rect) {
+    let edge = egui::Color32::from_rgb(186, 104, 255);
+    painter.rect_filled(rect, 1.5, egui::Color32::from_rgb(46, 36, 78));
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(2.0, edge), egui::StrokeKind::Inside);
+    paint_corner_caps(painter, rect, edge);
+}
+
+fn paint_slide_switch(ui: &mut egui::Ui, rect: egui::Rect, on: bool, id: egui::Id, enabled: bool) -> bool {
+    let t = ui.ctx().animate_bool_with_time(id.with("knob"), on, 0.16);
+    let track = if !enabled {
+        egui::Color32::from_rgb(90, 94, 100)
+    } else if t > 0.5 {
+        GOLD
+    } else {
+        egui::Color32::from_rgb(70, 74, 82)
+    };
+    ui.painter().rect_filled(rect, rect.height() * 0.5, track);
+    let knob = rect.height() - 4.0;
+    let x = rect.left() + 2.0 + t * (rect.width() - knob - 4.0);
+    ui.painter().circle_filled(egui::pos2(x + knob * 0.5, rect.center().y), knob * 0.5, egui::Color32::from_rgb(255, 248, 232));
+    if !enabled {
+        return false;
+    }
+    let hit = ui.interact(rect, id, Sense::click());
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
