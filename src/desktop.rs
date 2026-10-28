@@ -801,10 +801,6 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        if self.tab != Tab::Home {
-            // Blue theme over the whole page. 7% transparent, so a little wallpaper shows.
-            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(36, 62, 112, 237));
-        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -840,6 +836,7 @@ impl Desktop {
 
     fn page_in_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect, page: Page) {
         let panel = drect(full, 26.0, 96.0, 1228.0, 608.0);
+        page_veil(ui.painter(), panel);
         let inner = panel.shrink(us(full, 14.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
         style_page_widgets(&mut child);
@@ -1403,22 +1400,18 @@ impl Desktop {
     }
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let head = drect(full, 26.0, 104.0, 1228.0, 64.0);
-        let foot = drect(full, 26.0, 556.0, 1228.0, 128.0);
-        paint_template(ui.painter(), head);
-        paint_template(ui.painter(), foot);
-        let item_top = uy(full, 178.0);
-        let item_h = uy(full, 548.0) - item_top;
-        paint_gold_bar(ui.painter(), ux(full, 746.0), item_top, item_h);
+        let veil = drect(full, 26.0, 96.0, 1228.0, 608.0);
+        page_veil(ui.painter(), veil);
+        paint_gold_bar(ui.painter(), ux(full, 746.0), veil.top() + 16.0, veil.height() - 32.0);
         self.paint_version_list(ui, full);
         self.paint_loader_panel(ui, full);
     }
 
     fn paint_version_list(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        paint_tracked(ui.painter(), egui::pos2(ux(full, 48.0), uy(full, 142.0)), egui::Align2::LEFT_CENTER, "INSTANCES", sub_font(us(full, 12.0)), egui::Color32::from_rgb(214, 224, 236), us(full, 1.2));
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 48.0), uy(full, 142.0)), egui::Align2::LEFT_CENTER, "INSTANCES", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.2));
         paint_gold_bar(ui.painter(), ux(full, 148.0), uy(full, 124.0), us(full, 36.0));
         let count = format!("{}", self.instances.len());
-        paint_tracked(ui.painter(), egui::pos2(ux(full, 164.0), uy(full, 142.0)), egui::Align2::LEFT_CENTER, &count, sub_font(us(full, 12.0)), egui::Color32::from_rgb(214, 224, 236), us(full, 1.0));
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 164.0), uy(full, 142.0)), egui::Align2::LEFT_CENTER, &count, sub_font(us(full, 12.0)), V_MUTED, us(full, 1.0));
         paint_gold_bar(ui.painter(), ux(full, 572.0), uy(full, 124.0), us(full, 36.0));
         let new_btn = drect(full, 590.0, 118.0, 128.0, 44.0);
         if pill_action(ui, new_btn, "New", true) {
@@ -1432,7 +1425,7 @@ impl Desktop {
             self.draft_open = true;
         }
 
-        let list = drect(full, 28.0, 178.0, 715.0, 368.0);
+        let list = drect(full, 28.0, 174.0, 715.0, 460.0);
         let row_h = uy(full, 234.0) - uy(full, 174.0);
         let painter = ui.painter().clone();
         let rows: Vec<crate::instances::Instance> = self.instances.clone();
@@ -1479,7 +1472,7 @@ impl Desktop {
         let bar_h = foot.height() * 0.42;
         let bar_y = foot.center().y - bar_h * 0.5;
         paint_gold_bar(&painter, foot.left() + us(full, 92.0), bar_y, bar_h);
-        paint_tracked(&painter, egui::pos2(foot.left() + us(full, 16.0), foot.center().y), egui::Align2::LEFT_CENTER, "SELECTED", sub_font(us(full, 12.0)), egui::Color32::from_rgb(214, 224, 236), us(full, 1.2));
+        paint_tracked(&painter, egui::pos2(foot.left() + us(full, 16.0), foot.center().y), egui::Align2::LEFT_CENTER, "SELECTED", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.2));
         let selected_name = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| self.selected.clone());
         let name_font = title_font(us(full, 16.0));
         painter.text(egui::pos2(foot.left() + us(full, 108.0), foot.center().y), egui::Align2::LEFT_CENTER, &selected_name, name_font.clone(), GOLD);
@@ -1587,7 +1580,7 @@ impl Desktop {
     }
 
     fn paint_loader_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), uy(full, 136.0)), egui::Align2::LEFT_CENTER, "LOADER", sub_font(us(full, 12.0)), egui::Color32::from_rgb(214, 224, 236), us(full, 1.3));
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), uy(full, 136.0)), egui::Align2::LEFT_CENTER, "LOADER", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.3));
         let for_mc = format!("FOR MC {}", self.selected);
         let for_font = sub_font(us(full, 13.0));
         let for_w = ui.painter().layout_no_wrap(for_mc.clone(), for_font, V_GOLD).size().x;
@@ -1598,8 +1591,8 @@ impl Desktop {
         let rows = crate::loaders::rows_for(&mc, &self.loaders);
         let mut clicked: Option<String> = None;
         for (i, row) in rows.iter().enumerate() {
-            let y = 182.0 + i as f32 * 70.0;
-            let rect = drect(full, 768.0, y, 483.0, 68.0);
+            let y = 168.0 + i as f32 * 78.0;
+            let rect = drect(full, 768.0, y, 483.0, 78.0);
             let on = self.loader_active(row.id);
             let hit = ui.interact(rect, egui::Id::new("loader-row").with(row.id), Sense::click());
             if hit.hovered() && !on && self.shot.is_none() {
@@ -1638,7 +1631,7 @@ impl Desktop {
         let primary = self.install_loader_id();
         let selected = rows.iter().find(|r| r.id == primary).cloned();
         let foot_y = uy(full, 578.0);
-        paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), foot_y), egui::Align2::LEFT_CENTER, "SELECTED LOADER", sub_font(us(full, 12.0)), egui::Color32::from_rgb(214, 224, 236), us(full, 1.1));
+        paint_tracked(ui.painter(), egui::pos2(ux(full, 790.0), foot_y), egui::Align2::LEFT_CENTER, "SELECTED LOADER", sub_font(us(full, 12.0)), V_MUTED, us(full, 1.1));
         if self.loader == "forge+optifine" {
             let ver = selected.as_ref().map(|r| r.version.as_str()).unwrap_or("");
             let right = if ver.is_empty() {
@@ -1744,9 +1737,6 @@ impl Desktop {
 
 
     fn page_mods(&mut self, ui: &mut egui::Ui) {
-        let frame_left = ui.max_rect().left();
-        let frame_right = ui.max_rect().right();
-        let frame_top = ui.cursor().min.y;
         ui.horizontal(|ui| {
             icon_label(ui, I_CUBE, 22.0, TEXT);
             ui.label(RichText::new("Mod").font(title_font(22.0)).color(TEXT));
@@ -1803,9 +1793,7 @@ impl Desktop {
             gold_slot(ui, 28.0);
             ui.label(RichText::new(format!("{} mods · {enabled} enabled", self.mods.len())).font(sub_font(13.0)).color(MUTED));
         });
-        let frame = egui::Rect::from_min_max(egui::pos2(frame_left, frame_top - 2.0), egui::pos2(frame_right, ui.cursor().min.y + 4.0));
-        paint_template(ui.painter(), frame);
-        ui.add_space(12.0);
+        ui.add_space(8.0);
         let list_h = ui.available_height().max(48.0);
         egui::ScrollArea::vertical()
             .max_height(list_h)
@@ -1837,21 +1825,18 @@ impl Desktop {
     }
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            icon_label(ui, I_FLARE, 22.0, TEXT);
+            ui.label(RichText::new("Settings").font(title_font(22.0)).color(TEXT));
+        });
+        ui.add_space(2.0);
         let width = ui.available_width();
         let body_h = ui.available_height();
-        let frame_left = ui.max_rect().left();
-        let frame_right = ui.max_rect().right();
         egui::ScrollArea::vertical()
             .max_height(body_h)
             .auto_shrink([false, false])
             .show(ui, |ui| {
         ui.set_min_width(width);
-        let frame_top = ui.cursor().min.y;
-        ui.horizontal(|ui| {
-            icon_label(ui, I_FLARE, 22.0, TEXT);
-            ui.label(RichText::new("Settings").font(title_font(22.0)).color(TEXT));
-        });
-        ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.set_width((width - 40.0) * 0.52);
@@ -1993,6 +1978,23 @@ impl Desktop {
                             }
                         }
                     });
+                    let rows: Vec<(String, String, String)> = self.servers.iter().map(|s| (s.name.clone(), s.address.clone(), s.icon.clone())).collect();
+                    for (name, addr, icon) in rows {
+                        ui.horizontal(|ui| {
+                            let label = if name.is_empty() { addr.clone() } else { name.clone() };
+                            ui.label(RichText::new(label).font(body_font(13.0)).color(if icon.is_empty() { MUTED } else { TEXT }));
+                            gold_slot(ui, 28.0);
+                            if plain_action(ui, "Play", 48.0, 28.0, false) {
+                                self.join_server(name.clone(), addr.clone());
+                            }
+                            gold_slot(ui, 28.0);
+                            if plain_action(ui, "Icon", 44.0, 28.0, false) {
+                                if let Some(path) = crate::dialog::pick_file("Server icon", "*.png") {
+                                    self.set_server_icon(&addr, &path);
+                                }
+                            }
+                        });
+                    }
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Data").font(body_font(13.0)).color(TEXT));
@@ -2007,26 +2009,6 @@ impl Desktop {
                 });
             });
         });
-        let frame = egui::Rect::from_min_max(egui::pos2(frame_left, frame_top - 2.0), egui::pos2(frame_right, ui.cursor().min.y + 4.0));
-        paint_template(ui.painter(), frame);
-        ui.add_space(12.0);
-        let rows: Vec<(String, String, String)> = self.servers.iter().map(|s| (s.name.clone(), s.address.clone(), s.icon.clone())).collect();
-        for (name, addr, icon) in rows {
-            ui.horizontal(|ui| {
-                let label = if name.is_empty() { addr.clone() } else { name.clone() };
-                ui.label(RichText::new(label).font(body_font(13.0)).color(if icon.is_empty() { MUTED } else { TEXT }));
-                gold_slot(ui, 28.0);
-                if plain_action(ui, "Play", 48.0, 28.0, false) {
-                    self.join_server(name.clone(), addr.clone());
-                }
-                gold_slot(ui, 28.0);
-                if plain_action(ui, "Icon", 44.0, 28.0, false) {
-                    if let Some(path) = crate::dialog::pick_file("Server icon", "*.png") {
-                        self.set_server_icon(&addr, &path);
-                    }
-                }
-            });
-        }
         });
     }
 }
@@ -2468,6 +2450,12 @@ fn paint_faded_rule(painter: &egui::Painter, x: f32, y: f32, w: f32) {
             egui::Color32::from_rgba_unmultiplied(214, 224, 234, alpha),
         );
     }
+}
+
+/// Content wash for Instance, Mods, and Settings. No template color:
+/// black at 15% opacity, so the wallpaper stays visible and only a little darker.
+fn page_veil(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(38));
 }
 
 fn paint_gold_bar(painter: &egui::Painter, x: f32, y: f32, h: f32) {
@@ -3120,13 +3108,6 @@ fn use_page_fonts(ui: &mut egui::Ui) {
 fn icon_label(ui: &mut egui::Ui, icon: char, size: f32, color: egui::Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size + 6.0, size + 4.0), Sense::hover());
     paint_material(ui.painter(), rect.center(), size, icon, color);
-}
-
-fn paint_template(painter: &egui::Painter, rect: egui::Rect) {
-    let edge = egui::Color32::from_rgb(196, 214, 232);
-    painter.rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18));
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
 }
 
 fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
