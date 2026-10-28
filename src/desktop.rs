@@ -82,6 +82,14 @@ impl Tab {
             Tab::Settings => "Settings",
         }
     }
+    fn nav_label(self) -> &'static str {
+        match self {
+            Tab::Home => "HOME",
+            Tab::Versions => "INSTANCE",
+            Tab::Mods => "MODS",
+            Tab::Settings => "SETTINGS",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1064,8 +1072,6 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        // Same palette veil on every page, 40% transparent, over the wallpaper.
-        ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, 153));
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -1076,7 +1082,8 @@ impl Desktop {
             }
         }
         let player = self.paint_player_bar(ui, full);
-        self.paint_shared_tabs(ui, full, player.right() + 8.0);
+        self.paint_shared_tabs(ui, full, player.right() + 10.0);
+        self.paint_title_logo(ui, full);
         self.paint_exit(ui, full);
         let now = ui.input(|i| i.time);
         if self.tab != self.seen_tab {
@@ -1090,10 +1097,10 @@ impl Desktop {
             Tab::Settings => self.page_in_panel(ui, full, Page::Settings),
         }
         let age = (now - self.tab_tick) as f32;
-        let fade = ease_out((age / 0.26).clamp(0.0, 1.0));
-        if fade < 0.995 {
-            let body = egui::Rect::from_min_max(egui::pos2(full.left(), 62.0), full.right_bottom());
-            ui.painter().rect_filled(body, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, ((1.0 - fade) * 168.0) as u8));
+        let fade = ease_out((age / 0.18).clamp(0.0, 1.0));
+        if self.shot.is_none() && fade < 0.995 {
+            let body = egui::Rect::from_min_max(egui::pos2(full.left(), 64.0), full.right_bottom());
+            ui.painter().rect_filled(body, 0.0, egui::Color32::from_rgba_unmultiplied(0x08, 0x12, 0x24, ((1.0 - fade) * 90.0) as u8));
         }
         if self.draft_open {
             self.paint_instance_popup(ui, full);
@@ -1136,24 +1143,6 @@ impl Desktop {
                 "Wallpaper is missing from this build",
                 body_font(16.0),
                 MUTED,
-            );
-        }
-        // Soft edge so the glass cards stay readable without hiding the art.
-        for i in 0..8 {
-            let t = (i + 1) as f32 / 8.0;
-            let a = (t * 28.0) as u8;
-            let band = 18.0;
-            let y0 = full.top() + i as f32 * band;
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(egui::pos2(full.left(), y0), egui::pos2(full.right(), y0 + band)),
-                0.0,
-                egui::Color32::from_black_alpha(a / 3),
-            );
-            let y1 = full.bottom() - (i as f32 + 1.0) * band;
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(egui::pos2(full.left(), y1), egui::pos2(full.right(), y1 + band)),
-                0.0,
-                egui::Color32::from_black_alpha(a),
             );
         }
     }
@@ -1559,34 +1548,39 @@ pub(crate) fn paint_download_bar(painter: &egui::Painter, rect: egui::Rect, frac
 
 fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool, horizon: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("play"), Sense::click());
-    let (text_color, font) = if stop {
-        let fill = if hit.hovered() {
-            egui::Color32::from_rgb(214, 92, 98)
-        } else {
-            egui::Color32::from_rgb(196, 74, 82)
-        };
-        ui.painter().rect_filled(rect, 2.0, fill);
-        ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(232, 156, 156)), egui::StrokeKind::Inside);
-        (egui::Color32::from_rgb(255, 244, 242), nav_font(rect.height() * 0.32))
+    let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.12);
+    let (fill, edge, ink) = if stop {
+        (
+            lerp_color(egui::Color32::from_rgb(176, 52, 64), egui::Color32::from_rgb(206, 72, 82), hot),
+            egui::Color32::from_rgb(255, 166, 170),
+            egui::Color32::from_rgb(255, 244, 242),
+        )
     } else if horizon {
-        ui.painter().rect_filled(rect.expand(3.0), 5.0, egui::Color32::from_rgba_unmultiplied(232, 186, 78, 36));
-        let fill = if hit.hovered() {
-            egui::Color32::from_rgb(168, 126, 48)
-        } else {
-            egui::Color32::from_rgb(138, 102, 36)
-        };
-        ui.painter().rect_filled(rect, 5.0, fill);
-        ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(1.15, egui::Color32::from_rgb(236, 206, 128)), egui::StrokeKind::Inside);
-        (egui::Color32::from_rgb(255, 236, 196), body_font(rect.height() * 0.34))
+        (
+            lerp_color(egui::Color32::from_rgb(138, 96, 28), egui::Color32::from_rgb(176, 126, 42), hot),
+            egui::Color32::from_rgb(255, 214, 120),
+            egui::Color32::from_rgb(255, 236, 196),
+        )
     } else {
-        let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.12);
-        let fill = lerp_color(HY_BG, HY_HIGH, hot);
-        ui.painter().rect_filled(rect, 1.5, fill);
-        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, lerp_color(HY_BORDER, HY_ACCENT, hot)), egui::StrokeKind::Inside);
-        paint_corner_caps(ui.painter(), rect, lerp_color(HY_BORDER, HY_ACCENT, hot));
-        (HY_TEXT, nav_font(rect.height() * 0.32))
+        (
+            lerp_color(egui::Color32::from_rgb(18, 42, 108), egui::Color32::from_rgb(28, 58, 138), hot),
+            egui::Color32::from_rgb(110, 186, 255),
+            egui::Color32::WHITE,
+        )
     };
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, text_color);
+    paint_neon_plate(ui.painter(), rect, 10.0, fill, edge);
+    let font = nav_font(rect.height() * 0.34);
+    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), ink).size().x;
+    let group = text_w + 22.0;
+    let tri = egui::pos2(rect.center().x - group * 0.5 + 6.0, rect.center().y);
+    if stop {
+        let bar = 2.2;
+        ui.painter().rect_filled(egui::Rect::from_center_size(tri + egui::vec2(-3.0, 0.0), egui::vec2(bar, 12.0)), 0.5, ink);
+        ui.painter().rect_filled(egui::Rect::from_center_size(tri + egui::vec2(3.0, 0.0), egui::vec2(bar, 12.0)), 0.5, ink);
+    } else {
+        paint_play_tri(ui.painter(), tri, 11.0, ink);
+    }
+    ui.painter().text(egui::pos2(tri.x + 16.0, rect.center().y), egui::Align2::LEFT_CENTER, label, font, ink);
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
@@ -1610,6 +1604,80 @@ fn paint_empty_cross(painter: &egui::Painter, center: egui::Pos2, size: f32, col
     let stroke = egui::Stroke::new(1.15, color);
     painter.line_segment([center + egui::vec2(-h, -h), center + egui::vec2(h, h)], stroke);
     painter.line_segment([center + egui::vec2(h, -h), center + egui::vec2(-h, h)], stroke);
+}
+
+fn paint_play_tri(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    painter.add(egui::Shape::convex_polygon(
+        vec![c + egui::vec2(-s * 0.32, -s * 0.48), c + egui::vec2(s * 0.48, 0.0), c + egui::vec2(-s * 0.32, s * 0.48)],
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
+fn paint_chevron(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32, down: bool) {
+    let stroke = egui::Stroke::new(1.35, color);
+    if down {
+        painter.line_segment([c + egui::vec2(-s, -s * 0.35), c + egui::vec2(0.0, s * 0.4)], stroke);
+        painter.line_segment([c + egui::vec2(0.0, s * 0.4), c + egui::vec2(s, -s * 0.35)], stroke);
+    } else {
+        painter.line_segment([c + egui::vec2(-s * 0.3, -s), c + egui::vec2(s * 0.42, 0.0)], stroke);
+        painter.line_segment([c + egui::vec2(s * 0.42, 0.0), c + egui::vec2(-s * 0.3, s)], stroke);
+    }
+}
+
+fn paint_search_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.4, color);
+    painter.circle_stroke(c + egui::vec2(-s * 0.12, -s * 0.1), s * 0.36, stroke);
+    painter.line_segment([c + egui::vec2(s * 0.12, s * 0.14), c + egui::vec2(s * 0.42, s * 0.42)], stroke);
+}
+
+fn paint_tick(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.6, color);
+    painter.line_segment([c + egui::vec2(-s * 0.45, 0.0), c + egui::vec2(-s * 0.08, s * 0.38)], stroke);
+    painter.line_segment([c + egui::vec2(-s * 0.08, s * 0.38), c + egui::vec2(s * 0.5, -s * 0.38)], stroke);
+}
+
+fn paint_trash(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.25, color);
+    painter.line_segment([c + egui::vec2(-s * 0.36, -s * 0.22), c + egui::vec2(s * 0.36, -s * 0.22)], stroke);
+    painter.line_segment([c + egui::vec2(-s * 0.14, -s * 0.22), c + egui::vec2(-s * 0.14, -s * 0.42)], stroke);
+    painter.line_segment([c + egui::vec2(-s * 0.14, -s * 0.42), c + egui::vec2(s * 0.14, -s * 0.42)], stroke);
+    painter.line_segment([c + egui::vec2(s * 0.14, -s * 0.42), c + egui::vec2(s * 0.14, -s * 0.22)], stroke);
+    let body = egui::Rect::from_center_size(c + egui::vec2(0.0, s * 0.14), egui::vec2(s * 0.64, s * 0.52));
+    painter.rect_stroke(body, 1.0, stroke, egui::StrokeKind::Inside);
+}
+
+fn paint_tab_glyph(painter: &egui::Painter, tab: Tab, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let stroke = egui::Stroke::new((s * 0.09).max(1.2), color);
+    match tab {
+        Tab::Home => paint_nav_house(painter, c, s, color),
+        Tab::Versions => {
+            let top = c + egui::vec2(0.0, -s * 0.42);
+            let right = c + egui::vec2(s * 0.46, -s * 0.16);
+            let left = c + egui::vec2(-s * 0.46, -s * 0.16);
+            let bot = c + egui::vec2(0.0, s * 0.46);
+            let mr = c + egui::vec2(s * 0.46, s * 0.18);
+            let ml = c + egui::vec2(-s * 0.46, s * 0.18);
+            for pair in [(left, top), (top, right), (right, mr), (mr, bot), (bot, ml), (ml, left), (left, right), (top, bot)] {
+                painter.line_segment([pair.0, pair.1], stroke);
+            }
+        }
+        Tab::Mods => {
+            let box_r = egui::Rect::from_center_size(c + egui::vec2(1.0, 1.5), egui::vec2(s * 0.62, s * 0.62));
+            painter.rect_stroke(box_r, 2.0, stroke, egui::StrokeKind::Inside);
+            painter.line_segment([c + egui::vec2(-s * 0.08, -s * 0.42), c + egui::vec2(-s * 0.08, -s * 0.16)], stroke);
+            painter.line_segment([c + egui::vec2(-s * 0.22, -s * 0.28), c + egui::vec2(s * 0.06, -s * 0.28)], stroke);
+            painter.circle_stroke(c + egui::vec2(s * 0.2, 0.02), s * 0.11, stroke);
+        }
+        Tab::Settings => {
+            painter.circle_stroke(c, s * 0.16, stroke);
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::TAU / 8.0;
+                let dir = egui::vec2(a.cos(), a.sin());
+                painter.line_segment([c + dir * s * 0.28, c + dir * s * 0.46], stroke);
+            }
+        }
+    }
 }
 
 fn paint_exit_icon(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
@@ -1956,7 +2024,7 @@ fn paint_fade(ui: &egui::Ui, rect: egui::Rect) {
 fn paint_frame(ctx: &egui::Context) {
     let rect = ctx.screen_rect();
     ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("frame")))
-        .rect_stroke(rect.shrink(0.5), 4.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(148, 168, 190)), egui::StrokeKind::Inside);
+        .rect_stroke(rect.shrink(0.5), 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(8, 14, 28, 40)), egui::StrokeKind::Inside);
 }
 
 fn paint_tab_sep(painter: &egui::Painter, x: f32, y: f32, h: f32) {
@@ -2679,19 +2747,45 @@ fn icon_label(ui: &mut egui::Ui, icon: char, size: f32, color: egui::Color32) {
     paint_material(ui.painter(), rect.center(), size, icon, color);
 }
 
-fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
-    let fill = HY_BG;
-    let edge = HY_BORDER;
-    painter.rect_filled(rect, 1.5, fill);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
+fn panel_fill(alpha: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(0x08, 0x14, 0x2C, alpha)
 }
 
-/// Page outline only. No fill, so the wallpaper stays open.
+fn glow_edge() -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(0x6E, 0xB8, 0xFF, 220)
+}
+
+fn paint_neon_plate(painter: &egui::Painter, rect: egui::Rect, radius: f32, fill: egui::Color32, edge: egui::Color32) {
+    for i in 1..=3 {
+        let a = 16 + i * 8;
+        painter.rect_stroke(
+            rect.expand(i as f32 * 1.15),
+            radius + 1.0,
+            egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(edge.r(), edge.g(), edge.b(), a)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.rect_filled(rect, radius, fill);
+    painter.rect_stroke(rect, radius, egui::Stroke::new(1.2, edge), egui::StrokeKind::Inside);
+}
+
+fn paint_glass_chip(painter: &egui::Painter, rect: egui::Rect, radius: f32, alpha: u8) {
+    painter.rect_filled(rect.expand(1.2), radius + 1.0, egui::Color32::from_rgba_unmultiplied(50, 120, 220, 28));
+    painter.rect_filled(rect, radius, panel_fill(alpha));
+    painter.rect_stroke(rect, radius, egui::Stroke::new(1.05, glow_edge()), egui::StrokeKind::Inside);
+}
+
+fn paint_glass_panel(painter: &egui::Painter, rect: egui::Rect, radius: f32) {
+    paint_neon_plate(painter, rect, radius, panel_fill(178), glow_edge());
+}
+
+fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
+    paint_glass_chip(painter, rect, 8.0, 214);
+}
+
+/// Page outline only. The wallpaper stays open behind the stroke.
 fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
-    let edge = HY_BORDER;
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
+    painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.15, glow_edge()), egui::StrokeKind::Inside);
 }
 
 /// Version-page element: stroke the length and the width, keep the corner cap,
@@ -2732,11 +2826,7 @@ fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
 
 /// One element, one template. Slightly open so the wallpaper still shows through.
 fn paint_element_template(painter: &egui::Painter, rect: egui::Rect) {
-    let fill = HY_SURFACE;
-    let edge = HY_BORDER;
-    painter.rect_filled(rect, 1.5, fill);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
+    paint_glass_chip(painter, rect, 7.0, 220);
 }
 
 fn paint_corner_caps(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
@@ -2942,13 +3032,11 @@ fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) 
 
 /// Same two install colors, blended top to bottom instead of a hard split.
 fn spec_content(full: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_max(egui::pos2(16.0, 64.0), egui::pos2(full.right() - 16.0, full.bottom() - 12.0))
+    egui::Rect::from_min_max(egui::pos2(16.0, 70.0), egui::pos2(full.right() - 16.0, full.bottom() - 14.0))
 }
 
 fn paint_main_box(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 1.5, HY_BG);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, HY_BORDER);
+    paint_glass_panel(painter, rect, 12.0);
 }
 
 fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: f32) {
@@ -2958,45 +3046,95 @@ fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: f32) {
 fn paint_mixed_card(painter: &egui::Painter, rect: egui::Rect, selected: f32, fade: f32) {
     let selected = selected.clamp(0.0, 1.0);
     let fade = fade.clamp(0.0, 1.0);
-    let fill = lerp_color(lerp_color(HY_SURFACE, HY_HIGH, selected), egui::Color32::from_rgb(0x12, 0x1C, 0x30), fade);
-    let edge = lerp_color(lerp_color(HY_BORDER, HY_ACCENT, selected), egui::Color32::from_rgb(0x2A, 0x3A, 0x52), fade);
-    painter.rect_filled(rect, 1.5, fill);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0 + selected, edge), egui::StrokeKind::Inside);
-    if fade < 0.85 {
-        paint_corner_caps(painter, rect, edge);
-    }
+    let fill = lerp_color(
+        lerp_color(panel_fill(214), egui::Color32::from_rgba_unmultiplied(0x1A, 0x2C, 0x52, 230), selected),
+        egui::Color32::from_rgba_unmultiplied(0x0A, 0x12, 0x22, 150),
+        fade,
+    );
+    let edge = lerp_color(lerp_color(glow_edge(), HY_ACCENT, selected), egui::Color32::from_rgb(0x3A, 0x4C, 0x68), fade);
+    painter.rect_filled(rect, 8.0, fill);
+    painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0 + selected * 0.6, edge), egui::StrokeKind::Inside);
 }
 
 fn red_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
-    let hit = ui.interact(rect, egui::Id::new("red-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
+    action_button(ui, rect, label, BtnKind::Danger)
+}
+
+fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
+    action_button(ui, rect, label, if primary { BtnKind::Gold } else { BtnKind::Quiet })
+}
+
+#[derive(Clone, Copy)]
+enum BtnKind {
+    Gold,
+    Outline,
+    Danger,
+    Quiet,
+}
+
+fn action_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, kind: BtnKind) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("act-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
     let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
-    let fill = lerp_color(egui::Color32::from_rgb(196, 74, 82), egui::Color32::from_rgb(214, 92, 98), hot);
-    ui.painter().rect_filled(rect, 1.5, fill);
-    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(232, 156, 156)), egui::StrokeKind::Inside);
-    paint_corner_caps(ui.painter(), rect, egui::Color32::from_rgb(232, 156, 156));
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), egui::Color32::from_rgb(255, 244, 242));
+    let ink = match kind {
+        BtnKind::Gold => egui::Color32::from_rgb(0x1A, 0x14, 0x08),
+        BtnKind::Danger => egui::Color32::from_rgb(255, 244, 242),
+        BtnKind::Outline => HY_ACCENT,
+        BtnKind::Quiet => HY_TEXT,
+    };
+    match kind {
+        BtnKind::Gold => {
+            let fill = lerp_color(egui::Color32::from_rgb(0xF0, 0xB4, 0x2E), egui::Color32::from_rgb(0xFF, 0xC8, 0x62), hot);
+            painter_gold(ui.painter(), rect, fill);
+        }
+        BtnKind::Danger => {
+            let fill = lerp_color(egui::Color32::from_rgb(176, 48, 62), egui::Color32::from_rgb(206, 70, 82), hot);
+            ui.painter().rect_filled(rect, 8.0, fill);
+            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 150, 156)), egui::StrokeKind::Inside);
+        }
+        BtnKind::Outline => {
+            ui.painter().rect_filled(rect, 8.0, panel_fill(if hot > 0.2 { 200 } else { 160 }));
+            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.15, HY_ACCENT), egui::StrokeKind::Inside);
+        }
+        BtnKind::Quiet => {
+            paint_glass_chip(ui.painter(), rect, 8.0, if hot > 0.2 { 230 } else { 200 });
+        }
+    }
+    let icon = match (kind, label) {
+        (BtnKind::Danger, _) => Some("trash"),
+        (BtnKind::Outline, _) => Some("tick"),
+        (BtnKind::Gold, "NEW" | "New instance") => Some("add"),
+        (BtnKind::Gold, "INSTALL") => Some("down"),
+        (BtnKind::Gold, "Search") => Some("search"),
+        _ => None,
+    };
+    let font = nav_font(11.5);
+    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), ink).size().x;
+    let icon_w = if icon.is_some() { 16.0 } else { 0.0 };
+    let group = icon_w + text_w;
+    let start = rect.center().x - group * 0.5;
+    if icon.is_some() {
+        let at = egui::pos2(start + 6.0, rect.center().y);
+        match icon {
+            Some("trash") => paint_trash(ui.painter(), at, 11.0, ink),
+            Some("tick") => paint_tick(ui.painter(), at, 9.0, ink),
+            Some("add") => paint_material(ui.painter(), at, 13.0, I_ADD, ink),
+            Some("down") => paint_material(ui.painter(), at, 13.0, I_DOWN, ink),
+            Some("search") => paint_search_icon(ui.painter(), at, 8.0, ink),
+            _ => {}
+        }
+    }
+    let text_x = if icon.is_some() { start + icon_w + 4.0 } else { rect.center().x };
+    let align = if icon.is_some() { egui::Align2::LEFT_CENTER } else { egui::Align2::CENTER_CENTER };
+    ui.painter().text(egui::pos2(text_x, rect.center().y), align, label, font, ink);
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
     hit.clicked()
 }
 
-fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
-    let hit = ui.interact(rect, egui::Id::new("opaque-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
-    let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
-    let fill = if primary {
-        lerp_color(HY_ACCENT, egui::Color32::from_rgb(0xFF, 0xC8, 0x6A), hot)
-    } else {
-        lerp_color(HY_HIGH, lerp_color(HY_HIGH, HY_TEXT, 0.14), hot)
-    };
-    let edge = if primary { fill } else { HY_BORDER };
-    ui.painter().rect_filled(rect, 1.5, fill);
-    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), if primary { HY_BG } else { HY_TEXT });
-    if hit.hovered() {
-        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-    }
-    hit.clicked()
+fn painter_gold(painter: &egui::Painter, rect: egui::Rect, fill: egui::Color32) {
+    painter.rect_filled(rect.expand(1.4), 9.0, egui::Color32::from_rgba_unmultiplied(0xF2, 0xB8, 0x4B, 36));
+    painter.rect_filled(rect, 8.0, fill);
 }
 
 fn paint_faded_card(painter: &egui::Painter, rect: egui::Rect) {
@@ -3005,27 +3143,25 @@ fn paint_faded_card(painter: &egui::Painter, rect: egui::Rect) {
 }
 
 fn paint_purple_card(painter: &egui::Painter, rect: egui::Rect) {
-    let edge = egui::Color32::from_rgb(0xA7, 0x8B, 0xFA);
-    painter.rect_filled(rect, 1.5, HY_SURFACE);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(2.0, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
+    let edge = egui::Color32::from_rgb(0xC4, 0x5A, 0x68);
+    painter.rect_filled(rect, 8.0, egui::Color32::from_rgba_unmultiplied(0x2A, 0x12, 0x1C, 210));
+    painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.3, edge), egui::StrokeKind::Inside);
 }
 
 fn paint_slide_switch(ui: &mut egui::Ui, rect: egui::Rect, on: bool, id: egui::Id, enabled: bool) -> bool {
     let t = ui.ctx().animate_bool_with_time(id.with("knob"), on, 0.16);
     let track = if !enabled {
-        egui::Color32::from_rgb(0x12, 0x1C, 0x30)
+        egui::Color32::from_rgb(0x2A, 0x36, 0x4C)
     } else if t > 0.5 {
-        HY_ACCENT
+        lerp_color(egui::Color32::from_rgb(0x3A, 0x48, 0x62), HY_ACCENT, (t - 0.35).clamp(0.0, 1.0))
     } else {
-        HY_SURFACE
+        egui::Color32::from_rgb(0x3A, 0x4C, 0x68)
     };
-    ui.painter().rect_filled(rect, 1.5, track);
-    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, if on { HY_ACCENT } else { HY_BORDER }), egui::StrokeKind::Inside);
+    ui.painter().rect_filled(rect, rect.height() * 0.5, track);
     let knob = (rect.height() - 4.0).max(8.0);
     let x = rect.left() + 2.0 + t * (rect.width() - knob - 4.0);
-    let knob_rect = egui::Rect::from_min_size(egui::pos2(x, rect.center().y - knob * 0.5), egui::vec2(knob, knob));
-    ui.painter().rect_filled(knob_rect, 1.0, if on { HY_BG } else { HY_TEXT });
+    let center = egui::pos2(x + knob * 0.5, rect.center().y);
+    ui.painter().circle_filled(center, knob * 0.5, if on { egui::Color32::from_rgb(255, 248, 236) } else { egui::Color32::from_rgb(0xC8, 0xD2, 0xE0) });
     if !enabled {
         return false;
     }
@@ -3059,22 +3195,17 @@ fn count_files(path: &std::path::Path) -> usize {
 }
 
 fn paint_blend_stage(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(18, 32, 58, 118));
-    paint_open_frame(painter, rect);
+    let _ = (painter, rect);
 }
 
 fn spec_panel(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 1.5, HY_BG);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, HY_BORDER);
+    paint_glass_panel(painter, rect, 12.0);
 }
 
 fn spec_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
-    let fill = if selected { HY_HIGH } else { HY_SURFACE };
-    let edge = if selected { HY_ACCENT } else { HY_BORDER };
-    painter.rect_filled(rect, 1.5, fill);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, edge);
+    let edge = if selected { HY_ACCENT } else { glow_edge() };
+    painter.rect_filled(rect, 8.0, panel_fill(if selected { 220 } else { 196 }));
+    painter.rect_stroke(rect, 8.0, egui::Stroke::new(if selected { 1.4 } else { 1.0 }, edge), egui::StrokeKind::Inside);
 }
 
 fn paint_check(painter: &egui::Painter, rect: egui::Rect, on: bool) {
@@ -3126,29 +3257,7 @@ fn classify_drop(path: &std::path::Path) -> u8 {
 }
 
 fn spec_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
-    let hit = ui.interact(rect, egui::Id::new("spec-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
-    let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
-    if primary {
-        let fill = lerp_color(HY_ACCENT, egui::Color32::from_rgb(0xFF, 0xC8, 0x6A), hot);
-        ui.painter().rect_filled(rect, 1.5, fill);
-        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, fill), egui::StrokeKind::Inside);
-    } else {
-        let fill = lerp_color(HY_SURFACE, HY_HIGH, hot);
-        ui.painter().rect_filled(rect, 1.5, fill);
-        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
-        paint_corner_caps(ui.painter(), rect, HY_BORDER);
-    }
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        nav_font(13.0),
-        if primary { HY_BG } else { HY_TEXT },
-    );
-    if hit.hovered() {
-        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-    }
-    hit.clicked()
+    action_button(ui, rect, label, if primary { BtnKind::Gold } else { BtnKind::Quiet })
 }
 
 fn paint_dashed_rect(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {

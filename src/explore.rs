@@ -16,6 +16,8 @@ pub struct Hit {
     pub description: String,
     pub icon_url: String,
     pub downloads: u64,
+    pub categories: Vec<String>,
+    pub latest_version: String,
 }
 
 #[derive(Clone)]
@@ -65,12 +67,26 @@ pub fn search(kind: &str, version: &str, loader: &str, query: &str) -> Result<Ve
             if id.is_empty() {
                 continue;
             }
+            let categories = h
+                .get("display_categories")
+                .or_else(|| h.get("categories"))
+                .and_then(|x| x.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| c.as_str().map(|s| s.to_string()))
+                        .filter(|s| !matches!(s.as_str(), "fabric" | "forge" | "neoforge" | "quilt"))
+                        .take(3)
+                        .collect()
+                })
+                .unwrap_or_default();
             out.push(Hit {
                 id,
                 title: h.get("title").and_then(|x| x.as_str()).unwrap_or("Untitled").into(),
                 description: h.get("description").and_then(|x| x.as_str()).unwrap_or("").into(),
                 icon_url: h.get("icon_url").and_then(|x| x.as_str()).unwrap_or("").into(),
                 downloads: h.get("downloads").and_then(|x| x.as_u64()).unwrap_or(0),
+                categories,
+                latest_version: h.get("latest_version").and_then(|x| x.as_str()).unwrap_or("").into(),
             });
         }
     }

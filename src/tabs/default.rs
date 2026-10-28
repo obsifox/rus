@@ -5,8 +5,7 @@ use super::super::*;
 impl super::super::Desktop {
     pub(crate) fn page_in_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect, page: Page) {
         let panel = drect(full, 26.0, 96.0, 1228.0, 608.0);
-        page_veil(ui.painter(), panel);
-        paint_open_frame(ui.painter(), panel);
+        paint_glass_panel(ui.painter(), panel, 12.0);
         let inner = panel.shrink(us(full, 14.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
         style_page_widgets(&mut child);
@@ -19,22 +18,16 @@ impl super::super::Desktop {
 
     pub(crate) fn paint_shared_tabs(&mut self, ui: &mut egui::Ui, full: egui::Rect, left: f32) -> egui::Rect {
         let tabs = [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings];
-        let h = us(full, 40.0);
-        let font = nav_font(us(full, 14.5));
-        let track = us(full, 0.7);
-        let pad = us(full, 16.0);
+        let h = 46.0;
+        let font = nav_font(12.0);
         let mut widths = Vec::with_capacity(tabs.len());
         for tab in tabs {
-            if tab == Tab::Home {
-                widths.push(h * 0.28 + pad * 2.0);
-            } else {
-                let label = tab.label().to_uppercase();
-                widths.push(tracked_width(ui.painter(), &label, font.clone(), track) + pad * 2.0);
-            }
+            let label = tab.nav_label();
+            widths.push(22.0 + 16.0 + tracked_width(ui.painter(), label, font.clone(), 0.6) + 16.0);
         }
         let total: f32 = widths.iter().sum();
-        let bar = egui::Rect::from_min_size(egui::pos2(left, uy(full, 16.0)), egui::vec2(total, h));
-        paint_hytale_bar(ui.painter(), bar);
+        let bar = egui::Rect::from_min_size(egui::pos2(left, 14.0), egui::vec2(total, h));
+        paint_glass_chip(ui.painter(), bar, 10.0, 236);
         let mut x = bar.left();
         let mut rects = Vec::with_capacity(tabs.len());
         for (i, tab) in tabs.into_iter().enumerate() {
@@ -44,22 +37,18 @@ impl super::super::Desktop {
             let on = self.tab == tab;
             let active_t = ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("nav-on").with(tab.label()), on, 0.16));
             let hover_t = ui.ctx().animate_bool_with_time(egui::Id::new("nav-hov").with(tab.label()), hit.hovered(), 0.1);
-            let color = lerp_color(HY_TEXT, HY_ACCENT, active_t.max(hover_t * 0.4));
-            if tab == Tab::Home {
-                paint_nav_house(ui.painter(), rect.center(), h * 0.28, color);
-            } else {
-                let label = tab.label().to_uppercase();
-                paint_tracked(
-                    ui.painter(),
-                    rect.center() + egui::vec2(0.0, 1.0),
-                    egui::Align2::CENTER_CENTER,
-                    &label,
-                    font.clone(),
-                    egui::Color32::from_black_alpha(80),
-                    track,
-                );
-                paint_tracked(ui.painter(), rect.center(), egui::Align2::CENTER_CENTER, &label, font.clone(), color, track);
-            }
+            let color = lerp_color(HY_TEXT, HY_ACCENT, active_t.max(hover_t * 0.35));
+            let icon_at = egui::pos2(rect.left() + 20.0, rect.center().y);
+            paint_tab_glyph(ui.painter(), tab, icon_at, 15.0, color);
+            paint_tracked(
+                ui.painter(),
+                egui::pos2(icon_at.x + 14.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                tab.nav_label(),
+                font.clone(),
+                color,
+                0.6,
+            );
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
@@ -70,44 +59,39 @@ impl super::super::Desktop {
             x += widths[i];
         }
         let index = tabs.iter().position(|t| *t == self.tab).unwrap_or(0) as f32;
-        let slide = ui.ctx().animate_value_with_time(egui::Id::new("nav-slide"), index, 0.2);
+        let slide = ui.ctx().animate_value_with_time(egui::Id::new("nav-slide"), index, 0.18);
         let i0 = slide.floor() as usize;
         let i1 = (i0 + 1).min(rects.len().saturating_sub(1));
         if let (Some(a), Some(b)) = (rects.get(i0), rects.get(i1)) {
             let frac = slide - i0 as f32;
-            let left = a.left() + (b.left() - a.left()) * frac + 10.0;
-            let right = a.right() + (b.right() - a.right()) * frac - 10.0;
-            let underline = egui::Rect::from_min_max(egui::pos2(left, a.bottom() - 3.0), egui::pos2(right, a.bottom() - 1.0));
-            ui.painter().rect_filled(underline, 0.0, GOLD);
+            let left = a.left() + (b.left() - a.left()) * frac + 14.0;
+            let right = a.right() + (b.right() - a.right()) * frac - 14.0;
+            let underline = egui::Rect::from_min_max(egui::pos2(left, a.bottom() - 4.0), egui::pos2(right, a.bottom() - 1.0));
+            ui.painter().rect_filled(underline, 1.0, GOLD);
         }
-        let sep_h = us(full, 52.0) * 0.44;
-        let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("tab-seps")));
-        let mut sx = bar.left();
-        for (i, width) in widths.iter().enumerate() {
-            if i > 0 {
-                paint_tab_sep(&fg, sx, bar.center().y - sep_h * 0.5, sep_h);
-            }
-            sx += width;
-        }
+        let _ = full;
         bar
     }
 
     pub(crate) fn paint_player_bar(&mut self, ui: &mut egui::Ui, full: egui::Rect) -> egui::Rect {
         let name = if self.username.is_empty() { "Player".to_string() } else { self.username.clone() };
-        let font = title_font(13.0);
-        let text_w = ui.painter().layout_no_wrap(name.clone(), font.clone(), TEXT).size().x;
-        let h = us(full, 40.0);
-        let head_s = (h - 10.0).clamp(16.0, 20.0);
-        let pad = 8.0;
-        let bar = egui::Rect::from_min_size(
-            egui::pos2(ux(full, 22.0), uy(full, 16.0)),
-            egui::vec2(pad + head_s + 8.0 + text_w + 12.0, h),
-        );
-        paint_hytale_bar(ui.painter(), bar);
-        let head = egui::Rect::from_center_size(
-            egui::pos2(bar.left() + pad + head_s * 0.5, bar.center().y),
-            egui::vec2(head_s, head_s),
-        );
+        let sub = match self.loader.as_str() {
+            "forge" | "forge+optifine" => "Forge",
+            "fabric" => "Fabric",
+            "neoforge" => "NeoForge",
+            "optifine" => "OptiFine",
+            _ => "Vanilla",
+        };
+        let name_font = title_font(13.0);
+        let sub_f = sub_font(10.0);
+        let name_w = ui.painter().layout_no_wrap(name.clone(), name_font.clone(), TEXT).size().x;
+        let sub_w = ui.painter().layout_no_wrap(sub.to_string(), sub_f.clone(), HY_MUTED).size().x;
+        let h = 46.0;
+        let head_s = 28.0;
+        let text_w = name_w.max(sub_w);
+        let bar = egui::Rect::from_min_size(egui::pos2(16.0, 14.0), egui::vec2(12.0 + head_s + 8.0 + text_w + 28.0, h));
+        paint_glass_chip(ui.painter(), bar, 10.0, 236);
+        let head = egui::Rect::from_center_size(egui::pos2(bar.left() + 8.0 + head_s * 0.5, bar.center().y), egui::vec2(head_s, head_s));
         let hit = ui.interact(bar, egui::Id::new("player-card"), Sense::click());
         if let Some(face) = &self.avatar {
             ui.painter().add(
@@ -117,30 +101,25 @@ impl super::super::Desktop {
         } else {
             ui.painter().rect_filled(head, 3.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
         }
-        ui.painter().text(
-            egui::pos2(head.right() + 8.0, bar.center().y),
-            egui::Align2::LEFT_CENTER,
-            &name,
-            font,
-            egui::Color32::from_rgb(236, 228, 214),
-        );
+        let text_x = head.right() + 8.0;
+        ui.painter().text(egui::pos2(text_x, bar.center().y - 7.0), egui::Align2::LEFT_CENTER, &name, name_font, egui::Color32::WHITE);
+        ui.painter().text(egui::pos2(text_x, bar.center().y + 8.0), egui::Align2::LEFT_CENTER, sub, sub_f, HY_MUTED);
+        paint_chevron(ui.painter(), egui::pos2(bar.right() - 14.0, bar.center().y), 4.0, HY_MUTED, true);
         if hit.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
         if hit.clicked() {
             self.tab = Tab::Settings;
         }
+        let _ = full;
         bar
     }
 
     /// Title mark, left of the window and above the version / play-time card.
     pub(crate) fn paint_exit(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        // 3px clear of the 4px rounded corner, on both axes.
-        let h = 4.0;
-        let corner = egui::pos2(full.right() - 4.0 - 3.0, full.top() + 4.0 + 3.0);
-        let center = corner + egui::vec2(-h, h);
-        let size = h * 2.0;
-        let exit = egui::Rect::from_center_size(center, egui::vec2(16.0, 16.0));
+        let center = egui::pos2(full.right() - 16.0, full.top() + 16.0);
+        let size = 9.0;
+        let exit = egui::Rect::from_center_size(center, egui::vec2(18.0, 18.0));
         let hit = ui.interact(exit, egui::Id::new("exit-version"), Sense::click());
         paint_empty_cross(ui.painter(), center, size, empty_gold(hit.hovered()));
         if hit.hovered() {

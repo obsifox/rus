@@ -23,13 +23,12 @@ impl super::super::Desktop {
     pub(crate) fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let horizon_on = self.engine == "horizon";
         self.paint_recent_servers(ui, full);
-        self.paint_title_logo(ui, full);
         self.paint_instance_card(ui, full);
 
-        let play_h = us(full, 52.0);
-        let play_w = 112.0;
+        let play_h = 50.0;
+        let play_w = 156.0;
         let play = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 22.0 - play_w, uy(full, 640.0)),
+            egui::pos2(full.right() - 18.0 - play_w, full.bottom() - 28.0 - play_h),
             egui::vec2(play_w, play_h),
         );
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -81,10 +80,10 @@ impl super::super::Desktop {
         let Some(tex) = &self.logo_title else { return };
         let size = tex.size();
         let aspect = if size[1] == 0 { 1080.0 / 481.0 } else { size[0] as f32 / size[1] as f32 };
-        let h = 104.0;
+        let h = 78.0;
         let w = h * aspect;
         let rect = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 30.0 - w, full.top() + 40.0),
+            egui::pos2(full.right() - 42.0 - w, full.top() + 8.0),
             egui::vec2(w, h),
         );
         ui.painter().image(
@@ -101,9 +100,9 @@ impl super::super::Desktop {
         let loader = self.loader_line(&version);
         let (number, unit, _) = crate::state::play_label(self.shown_play_ms());
         let time = format!("{number}{unit}");
-        let ver_font = title_font(us(full, 15.0));
-        let sub_f = sub_font(10.0);
-        let time_font = title_font(us(full, 14.0));
+        let ver_font = title_font(15.0);
+        let sub_f = sub_font(11.0);
+        let time_font = title_font(13.0);
         let white = egui::Color32::WHITE;
         let ver_w = ui.painter().layout_no_wrap(version.clone(), ver_font.clone(), GOLD).size().x;
         let loader_w = ui.painter().layout_no_wrap(loader.clone(), sub_f.clone(), white).size().x;
@@ -111,46 +110,40 @@ impl super::super::Desktop {
         let tail = self.status_tail();
         let tail_w = ui.painter().layout_no_wrap(tail.clone(), time_font.clone(), TEXT).size().x;
         let text_w = ver_w.max(loader_w);
-        let h = us(full, 52.0);
-        let icon = 22.0;
-        let pad = 10.0;
-        let right_gap = 12.0;
-        let clock_r = 8.0;
-        let clock_gap = 10.0;
-        let tail_gap = 8.0;
-        let tail_pad = 10.0;
-        let w = pad + icon + 8.0 + text_w + 8.0 + 2.0 + clock_gap + clock_r * 2.0 + 9.0 + time_w + tail_gap + 2.0 + tail_pad + tail_w + right_gap;
-        let card = egui::Rect::from_min_size(egui::pos2(ux(full, 26.0), uy(full, 640.0)), egui::vec2(w, h));
-        paint_hytale_bar(ui.painter(), card);
-        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + pad + icon * 0.5, card.center().y), egui::vec2(icon, icon));
+        let h = 50.0;
+        let icon = 26.0;
+        let w = 12.0 + icon + 10.0 + text_w + 16.0 + 18.0 + 8.0 + time_w + 16.0 + 18.0 + 8.0 + tail_w + 14.0;
+        let card = egui::Rect::from_min_size(egui::pos2(16.0, full.bottom() - 28.0 - h), egui::vec2(w, h));
+        paint_glass_chip(ui.painter(), card, 10.0, 214);
+        let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + 12.0 + icon * 0.5, card.center().y), egui::vec2(icon, icon));
         if let Some(tex) = self.loader_icon() {
             ui.painter().image(tex.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        let text_x = icon_rect.right() + 8.0;
-        let ver_y = card.center().y - 7.0;
-        ui.painter().text(egui::pos2(text_x, ver_y), egui::Align2::LEFT_CENTER, &version, ver_font, GOLD);
-        ui.painter().text(egui::pos2(text_x, ver_y + 13.0), egui::Align2::LEFT_CENTER, &loader, sub_f, white);
-        let text_y = card.center().y;
-        let text_right = text_x + text_w;
-        let bar_x = text_right + 8.0;
-        paint_faded_bar(ui.painter(), bar_x, card.top() + card.height() * 0.28, card.height() * 0.44);
-        let clock_x = bar_x + 2.0 + clock_gap + clock_r;
-        paint_clock(ui.painter(), egui::pos2(clock_x, text_y), GOLD);
-        let time_x = clock_x + 16.0;
-        ui.painter().text(egui::pos2(time_x, text_y), egui::Align2::LEFT_CENTER, &time, time_font.clone(), TEXT);
-        let tail_bar_x = time_x + time_w + tail_gap;
-        paint_faded_bar(ui.painter(), tail_bar_x, card.top() + card.height() * 0.28, card.height() * 0.44);
-        ui.painter().text(egui::pos2(tail_bar_x + 2.0 + tail_pad, text_y), egui::Align2::LEFT_CENTER, &tail, time_font.clone(), TEXT);
+        let text_x = icon_rect.right() + 10.0;
+        ui.painter().text(egui::pos2(text_x, card.center().y - 8.0), egui::Align2::LEFT_CENTER, &version, ver_font, GOLD);
+        ui.painter().text(egui::pos2(text_x, card.center().y + 8.0), egui::Align2::LEFT_CENTER, &loader, sub_f, white);
+        let sep1 = text_x + text_w + 12.0;
+        paint_faded_bar(ui.painter(), sep1, card.top() + 12.0, card.height() - 24.0);
+        paint_clock(ui.painter(), egui::pos2(sep1 + 16.0, card.center().y), egui::Color32::from_rgb(120, 186, 255));
+        let time_x = sep1 + 28.0;
+        ui.painter().text(egui::pos2(time_x, card.center().y), egui::Align2::LEFT_CENTER, &time, time_font.clone(), TEXT);
+        let sep2 = time_x + time_w + 12.0;
+        paint_faded_bar(ui.painter(), sep2, card.top() + 12.0, card.height() - 24.0);
+        paint_material(ui.painter(), egui::pos2(sep2 + 16.0, card.center().y), 14.0, I_FOLDER, egui::Color32::from_rgb(120, 186, 255));
+        ui.painter().text(egui::pos2(sep2 + 28.0, card.center().y), egui::Align2::LEFT_CENTER, &tail, time_font, TEXT);
         card
     }
 
     pub(crate) fn paint_horizon_option(&mut self, ui: &mut egui::Ui, play: egui::Rect, on: bool) -> bool {
-        let font = if on { title_font(12.5) } else { sub_font(12.0) };
+        let font = if on { title_font(12.0) } else { sub_font(12.0) };
         let label = "Horizon";
         let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), GOLD).size().x;
-        let row = egui::Rect::from_center_size(egui::pos2(play.center().x, play.bottom() + 11.0), egui::vec2(text_w + 16.0, 16.0));
+        let row = egui::Rect::from_center_size(egui::pos2(play.center().x, play.bottom() + 14.0), egui::vec2(text_w + 56.0, 16.0));
         let hit = ui.interact(row, egui::Id::new("horizon-option"), Sense::click());
         let pos = row.center();
+        let line = if on { GOLD } else { egui::Color32::from_rgba_unmultiplied(200, 214, 230, 140) };
+        ui.painter().hline(pos.x - text_w * 0.5 - 28.0..=pos.x - text_w * 0.5 - 8.0, pos.y, egui::Stroke::new(1.0, line));
+        ui.painter().hline(pos.x + text_w * 0.5 + 8.0..=pos.x + text_w * 0.5 + 28.0, pos.y, egui::Stroke::new(1.0, line));
         if on {
             for (dx, dy, a) in [(0.0, 0.0, 42u8), (0.0, 1.0, 28), (-1.0, 0.0, 22), (1.0, 0.0, 22)] {
                 ui.painter().text(

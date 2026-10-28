@@ -5,15 +5,24 @@ use super::super::*;
 impl super::super::Desktop {
     pub(crate) fn paint_mods_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let content = spec_content(full);
-        paint_blend_stage(ui.painter(), content);
         spec_panel(ui.painter(), content);
-        let inner = content.shrink(12.0);
+        let inner = content.shrink(14.0);
         let mode_y = inner.top();
-        let mut x = inner.left();
+        let mut x = inner.left() + 4.0;
         for (i, label) in ["Installed", "Explore"].iter().enumerate() {
-            let w = chip_w(ui, label);
-            let rect = egui::Rect::from_min_size(egui::pos2(x, mode_y), egui::vec2(w, 28.0));
-            if tab_chip(ui, rect, label, self.mod_view as usize == i, egui::Id::new("mod-view").with(i)) {
+            let on = self.mod_view as usize == i;
+            let w = if on { chip_w(ui, label) + 8.0 } else { chip_w(ui, label) };
+            let rect = egui::Rect::from_min_size(egui::pos2(x, mode_y), egui::vec2(w, 30.0));
+            let hit = ui.interact(rect, egui::Id::new("mod-view").with(i), Sense::click());
+            if on {
+                ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(0x2C, 0x24, 0x12));
+                ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, HY_ACCENT), egui::StrokeKind::Inside);
+            }
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, *label, nav_font(13.0), if on { HY_ACCENT } else { HY_TEXT });
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if hit.clicked() {
                 self.mod_view = i as u8;
                 self.explore_ver_open = false;
                 self.explore_open = None;
@@ -21,31 +30,36 @@ impl super::super::Desktop {
                     self.explore_dirty = true;
                 }
             }
-            x += w + 8.0;
+            x += w + 6.0;
         }
-        let inst = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| "No instance".into());
-        let summary = if self.mod_view == 1 {
-            let loader = if self.explore_loader.is_empty() { "Fabric".to_string() } else { loader_name(&self.explore_loader).to_string() };
-            format!("{inst} · {loader} · Modrinth")
-        } else {
-            let n = self.pack_entries().len();
-            format!("{inst} · {} · {n}", crate::state::loader_label(&self.loader))
-        };
-        ui.painter().text(
-            egui::pos2(inner.right(), mode_y + 14.0),
-            egui::Align2::RIGHT_CENTER,
-            &ellipsize(ui.painter(), &summary, sub_font(12.0), (inner.right() - x - 12.0).max(80.0)),
-            sub_font(12.0),
-            SPEC_MUTED,
-        );
 
-        let cats = ["Modpack", "Mods", "Resource packs", "Shader packs"];
-        let mut x = inner.left();
-        let cat_y = mode_y + 34.0;
-        for (i, label) in cats.iter().enumerate() {
-            let w = chip_w(ui, label);
-            let rect = egui::Rect::from_min_size(egui::pos2(x, cat_y), egui::vec2(w, 28.0));
-            if tab_chip(ui, rect, label, self.pack_tab as usize == i, egui::Id::new("pack-tab").with(i)) {
+        let cats = [("Modpack", I_LAYERS), ("Mods", '\u{E87B}'), ("Resource packs", I_FOLDER), ("Shader packs", I_FLARE)];
+        let mut widths = Vec::new();
+        for (label, _) in cats {
+            widths.push(chip_w(ui, label) + 16.0);
+        }
+        let bar_w: f32 = widths.iter().sum();
+        let cat_y = mode_y + 38.0;
+        let cat_bar = egui::Rect::from_min_size(egui::pos2(inner.left(), cat_y), egui::vec2(bar_w, 34.0));
+        paint_glass_chip(ui.painter(), cat_bar, 8.0, 200);
+        let mut x = cat_bar.left();
+        for (i, ((label, icon), w)) in cats.into_iter().zip(widths).enumerate() {
+            let rect = egui::Rect::from_min_size(egui::pos2(x, cat_bar.top()), egui::vec2(w, cat_bar.height()));
+            let on = self.pack_tab as usize == i;
+            let hit = ui.interact(rect, egui::Id::new("pack-tab").with(i), Sense::click());
+            if on {
+                ui.painter().rect_filled(rect.shrink2(egui::vec2(3.0, 4.0)), 7.0, egui::Color32::from_rgb(0x2C, 0x24, 0x12));
+            }
+            let ink = if on { HY_ACCENT } else { HY_TEXT };
+            paint_material(ui.painter(), egui::pos2(rect.left() + 16.0, rect.center().y), 14.0, icon, ink);
+            ui.painter().text(egui::pos2(rect.left() + 28.0, rect.center().y), egui::Align2::LEFT_CENTER, label, nav_font(12.0), ink);
+            if on {
+                ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(rect.left() + 12.0, rect.bottom() - 3.0), egui::pos2(rect.right() - 8.0, rect.bottom() - 1.0)), 1.0, HY_ACCENT);
+            }
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if hit.clicked() {
                 self.pack_tab = i as u8;
                 self.row_focus = 0;
                 self.explore_ver_open = false;
@@ -54,10 +68,10 @@ impl super::super::Desktop {
                     self.explore_dirty = true;
                 }
             }
-            x += w + 8.0;
+            x += w;
         }
 
-        let list_top = if self.mod_view == 1 { cat_y + 68.0 } else { cat_y + 36.0 };
+        let list_top = if self.mod_view == 1 { cat_y + 92.0 } else { cat_y + 42.0 };
         let path_bar = egui::Rect::from_min_max(egui::pos2(inner.left(), inner.bottom() - 36.0), inner.right_bottom());
         let list_bottom = if self.mod_view == 1 { inner.bottom() } else { path_bar.top() - 8.0 };
         let list = egui::Rect::from_min_max(egui::pos2(inner.left(), list_top), egui::pos2(inner.right(), list_bottom));
@@ -80,44 +94,70 @@ impl super::super::Desktop {
     }
 
     fn paint_explore_filters(&mut self, ui: &mut egui::Ui, inner: egui::Rect, y: f32) {
-        ui.painter().text(egui::pos2(inner.left(), y + 16.0), egui::Align2::LEFT_CENTER, "Version", sub_font(12.0), SPEC_MUTED);
+        ui.painter().text(egui::pos2(inner.left(), y), egui::Align2::LEFT_TOP, "Minecraft Version", sub_font(11.0), HY_MUTED);
+        ui.painter().text(egui::pos2(inner.left() + 132.0, y), egui::Align2::LEFT_TOP, "Loader", sub_font(11.0), HY_MUTED);
+        let controls = y + 16.0;
         let ver = if self.explore_version.is_empty() { "26.3".to_string() } else { self.explore_version.clone() };
-        let ver_w = chip_w(ui, &ver).max(72.0);
-        let ver_rect = egui::Rect::from_min_size(egui::pos2(inner.left() + 58.0, y), egui::vec2(ver_w, 32.0));
-        if spec_button(ui, ver_rect, &ver, self.explore_ver_open) {
+        let ver_rect = egui::Rect::from_min_size(egui::pos2(inner.left(), controls), egui::vec2(118.0, 32.0));
+        paint_glass_chip(ui.painter(), ver_rect, 8.0, 210);
+        ui.painter().text(egui::pos2(ver_rect.left() + 12.0, ver_rect.center().y), egui::Align2::LEFT_CENTER, &ver, body_font(13.0), HY_TEXT);
+        paint_chevron(ui.painter(), egui::pos2(ver_rect.right() - 14.0, ver_rect.center().y), 4.0, HY_MUTED, true);
+        let ver_hit = ui.interact(ver_rect, egui::Id::new("ex-ver-open"), Sense::click());
+        if ver_hit.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if ver_hit.clicked() {
             self.explore_ver_open = !self.explore_ver_open;
             self.explore_ver_skip = self.explore_ver_open;
         }
-        let mut x = ver_rect.right() + 16.0;
-        ui.painter().text(egui::pos2(x, y + 16.0), egui::Align2::LEFT_CENTER, "Loader", sub_font(12.0), SPEC_MUTED);
-        x += 52.0;
+        let mut x = inner.left() + 132.0;
         for loader in ["forge", "fabric", "neoforge"] {
             let label = match loader {
                 "forge" => "Forge",
                 "fabric" => "Fabric",
                 _ => "NeoForge",
             };
-            let w = chip_w(ui, label);
-            let rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, 32.0));
-            if tab_chip(ui, rect, label, self.explore_loader == loader, egui::Id::new("ex-loader").with(loader)) {
+            let w = chip_w(ui, label) + 10.0;
+            let rect = egui::Rect::from_min_size(egui::pos2(x, controls), egui::vec2(w, 32.0));
+            let on = self.explore_loader == loader;
+            let hit = ui.interact(rect, egui::Id::new("ex-loader").with(loader), Sense::click());
+            if on {
+                ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgba_unmultiplied(0x1A, 0x2A, 0x48, 230));
+                ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.2, HY_ACCENT), egui::StrokeKind::Inside);
+            } else {
+                paint_glass_chip(ui.painter(), rect, 8.0, 190);
+            }
+            let ink = if on { HY_ACCENT } else { HY_TEXT };
+            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.center().y), egui::vec2(14.0, 14.0));
+            if let Some(tex) = self.loader_icon_id(loader) {
+                ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            } else if on {
+                paint_tick(ui.painter(), icon.center(), 7.0, ink);
+            }
+            ui.painter().text(egui::pos2(rect.left() + 28.0, rect.center().y), egui::Align2::LEFT_CENTER, label, nav_font(12.0), ink);
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if hit.clicked() {
                 self.explore_loader = loader.into();
                 self.explore_ver_open = false;
                 self.explore_dirty = true;
             }
             x += w + 6.0;
         }
-        let search_btn = egui::Rect::from_min_size(egui::pos2(inner.right() - 78.0, y), egui::vec2(78.0, 32.0));
-        let field = egui::Rect::from_min_max(egui::pos2(x + 8.0, y), egui::pos2(search_btn.left() - 8.0, y + 32.0));
+        let search_btn = egui::Rect::from_min_size(egui::pos2(inner.right() - 96.0, controls), egui::vec2(96.0, 32.0));
+        let field = egui::Rect::from_min_max(egui::pos2(x + 8.0, controls), egui::pos2(search_btn.left() - 8.0, controls + 32.0));
         if field.width() > 40.0 {
-            spec_card(ui.painter(), field, false);
-            let mut edit = ui.new_child(egui::UiBuilder::new().max_rect(field.shrink2(egui::vec2(8.0, 4.0))));
+            paint_glass_chip(ui.painter(), field, 8.0, 200);
+            paint_search_icon(ui.painter(), egui::pos2(field.left() + 16.0, field.center().y), 7.0, HY_MUTED);
+            let mut edit = ui.new_child(egui::UiBuilder::new().max_rect(field.shrink2(egui::vec2(28.0, 4.0))));
             edit.set_clip_rect(field.shrink(2.0));
             let resp = edit.add(
                 egui::TextEdit::singleline(&mut self.explore_query)
                     .id(egui::Id::new("explore-query"))
-                    .hint_text("Search")
-                    .font(body_font(14.0))
-                    .desired_width(field.width() - 8.0)
+                    .hint_text("Search mods, authors, or keywords...")
+                    .font(body_font(13.0))
+                    .desired_width(field.width() - 36.0)
                     .frame(false),
             );
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -133,7 +173,7 @@ impl super::super::Desktop {
 
     fn paint_version_menu(&mut self, ui: &mut egui::Ui, inner: egui::Rect, y: f32) {
         let versions = self.explore_versions();
-        let menu = egui::Rect::from_min_size(egui::pos2(inner.left() + 58.0, y + 36.0), egui::vec2(168.0, 196.0));
+        let menu = egui::Rect::from_min_size(egui::pos2(inner.left(), y + 52.0), egui::vec2(168.0, 180.0));
         let closer = ui.interact(inner, egui::Id::new("ver-closer"), Sense::click());
         spec_panel(ui.painter(), menu);
         let mut pick = None;
@@ -181,29 +221,64 @@ impl super::super::Desktop {
         let mut open = None;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         child.set_clip_rect(list);
-        egui::ScrollArea::vertical().id_salt("explore-hits").auto_shrink([false, false]).show_rows(&mut child, 56.0, hits.len(), |ui, range| {
+        egui::ScrollArea::vertical().id_salt("explore-hits").auto_shrink([false, false]).show_rows(&mut child, 76.0, hits.len(), |ui, range| {
             for i in range {
                 let hit = &hits[i];
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(list.width(), 52.0), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(list.width(), 72.0), Sense::hover());
                 let row = ui.interact(rect, egui::Id::new("ex-hit").with(&hit.id), Sense::click());
-                spec_card(ui.painter(), rect.shrink2(egui::vec2(0.0, 4.0)), row.hovered() || row.clicked());
-                let icon = egui::Rect::from_min_size(egui::pos2(rect.left() + 8.0, rect.center().y - 16.0), egui::vec2(32.0, 32.0));
+                let card = rect.shrink2(egui::vec2(0.0, 4.0));
+                spec_card(ui.painter(), card, row.hovered() || i == 0);
+                let icon = egui::Rect::from_center_size(egui::pos2(card.left() + 26.0, card.center().y), egui::vec2(40.0, 40.0));
+                ui.painter().rect_filled(icon, 6.0, egui::Color32::from_rgba_unmultiplied(0x12, 0x1C, 0x34, 230));
                 if let Some(tex) = self.explore_icons.get(&hit.id) {
-                    ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    ui.painter().image(tex.id(), icon.shrink(3.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 } else {
-                    ui.painter().rect_filled(icon, 1.5, HY_HIGH);
                     let letter = hit.title.chars().next().unwrap_or('?').to_string();
                     ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, &letter, title_font(14.0), SPEC_MUTED);
                 }
+                let ver = display_version(&hit.latest_version);
+                let loader = loader_name(&self.explore_loader);
                 let count = compact_count(hit.downloads);
-                let count_w = ui.painter().layout_no_wrap(count.clone(), sub_font(12.0), SPEC_MUTED).size().x + 12.0;
-                let right = rect.right() - 18.0;
-                ui.painter().text(egui::pos2(right, rect.center().y), egui::Align2::RIGHT_CENTER, &count, sub_font(12.0), SPEC_MUTED);
-                let text_w = (right - count_w - 8.0 - (icon.right() + 10.0)).max(40.0);
-                let title = ellipsize(ui.painter(), &hit.title, body_font(14.0), text_w);
-                let desc = ellipsize(ui.painter(), &hit.description, sub_font(12.0), text_w);
-                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.center().y - 9.0), egui::Align2::LEFT_CENTER, &title, body_font(14.0), SPEC_TEXT);
-                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.center().y + 10.0), egui::Align2::LEFT_CENTER, &desc, sub_font(12.0), SPEC_MUTED);
+                let chev_x = card.right() - 14.0;
+                paint_chevron(ui.painter(), egui::pos2(chev_x, card.center().y), 5.0, HY_MUTED, false);
+                let meta_x = chev_x - 14.0;
+                ui.painter().text(egui::pos2(meta_x, card.center().y - 9.0), egui::Align2::RIGHT_CENTER, loader, sub_font(12.0), HY_TEXT);
+                if !ver.is_empty() {
+                    ui.painter().text(egui::pos2(meta_x, card.center().y + 9.0), egui::Align2::RIGHT_CENTER, &ver, sub_font(10.0), HY_MUTED);
+                }
+                let count_x = meta_x - 108.0;
+                ui.painter().text(egui::pos2(count_x, card.center().y - 9.0), egui::Align2::RIGHT_CENTER, &count, title_font(12.0), HY_TEXT);
+                ui.painter().text(egui::pos2(count_x, card.center().y + 8.0), egui::Align2::RIGHT_CENTER, "Downloads", sub_font(9.0), HY_MUTED);
+                paint_material(ui.painter(), egui::pos2(count_x - ui.painter().layout_no_wrap(count.clone(), title_font(12.0), HY_TEXT).size().x - 12.0, card.center().y - 9.0), 12.0, I_DOWN, HY_MUTED);
+                let text_right = count_x - 78.0;
+                let text_x = icon.right() + 10.0;
+                let text_w = (text_right - text_x).max(48.0);
+                let title = ellipsize(ui.painter(), &hit.title, title_font(13.0), text_w * 0.7);
+                ui.painter().text(egui::pos2(text_x, card.top() + 16.0), egui::Align2::LEFT_CENTER, &title, title_font(13.0), HY_TEXT);
+                if let Some(tag) = hit.categories.first() {
+                    let badge = pretty_tag(tag);
+                    let bw = ui.painter().layout_no_wrap(badge.clone(), sub_font(9.0), HY_ACCENT).size().x + 12.0;
+                    let title_w = ui.painter().layout_no_wrap(title.clone(), title_font(13.0), HY_TEXT).size().x;
+                    let badge_r = egui::Rect::from_min_size(egui::pos2(text_x + title_w + 8.0, card.top() + 8.0), egui::vec2(bw, 15.0));
+                    if badge_r.right() < text_right {
+                        ui.painter().rect_filled(badge_r, 7.0, egui::Color32::from_rgba_unmultiplied(0xF2, 0xB8, 0x4B, 48));
+                        ui.painter().text(badge_r.center(), egui::Align2::CENTER_CENTER, &badge, sub_font(9.0), HY_ACCENT);
+                    }
+                }
+                let desc = ellipsize(ui.painter(), &hit.description, sub_font(11.0), text_w);
+                ui.painter().text(egui::pos2(text_x, card.top() + 34.0), egui::Align2::LEFT_CENTER, &desc, sub_font(11.0), HY_MUTED);
+                let mut tx = text_x;
+                for tag in hit.categories.iter().take(3) {
+                    let label = pretty_tag(tag);
+                    let tw = ui.painter().layout_no_wrap(label.clone(), sub_font(9.0), HY_MUTED).size().x + 12.0;
+                    if tx + tw > text_right {
+                        break;
+                    }
+                    let chip = egui::Rect::from_min_size(egui::pos2(tx, card.top() + 46.0), egui::vec2(tw, 14.0));
+                    ui.painter().rect_filled(chip, 6.0, egui::Color32::from_rgba_unmultiplied(0x1C, 0x30, 0x52, 230));
+                    ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, &label, sub_font(9.0), HY_MUTED);
+                    tx += tw + 4.0;
+                }
                 if row.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                 }
@@ -817,11 +892,31 @@ fn tab_chip(ui: &mut egui::Ui, rect: egui::Rect, label: &str, on: bool, id: egui
 
 fn compact_count(n: u64) -> String {
     if n >= 1_000_000 {
-        format!("{:.1}m", n as f32 / 1_000_000.0)
+        format!("{:.1}M", n as f32 / 1_000_000.0)
     } else if n >= 1_000 {
-        format!("{:.1}k", n as f32 / 1_000.0)
+        format!("{:.1}K", n as f32 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+fn display_version(raw: &str) -> String {
+    let v = raw.trim().trim_start_matches('v');
+    let dotted = v.chars().filter(|c| *c == '.').count() >= 1;
+    let numeric = v.chars().any(|c| c.is_ascii_digit());
+    let clean = v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-' | '_'));
+    if dotted && numeric && clean && v.len() <= 22 {
+        format!("v{v}")
+    } else {
+        String::new()
+    }
+}
+
+fn pretty_tag(tag: &str) -> String {
+    let mut chars = tag.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }
 

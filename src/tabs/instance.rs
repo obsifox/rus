@@ -35,17 +35,20 @@ impl super::super::Desktop {
     }
 
     pub(crate) fn paint_instance_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
-        let head = egui::Rect::from_min_size(col.min + egui::vec2(10.0, 4.0), egui::vec2(col.width() - 20.0, 32.0));
-        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), HY_ACCENT);
+        let head = egui::Rect::from_min_size(col.min + egui::vec2(12.0, 8.0), egui::vec2(col.width() - 24.0, 36.0));
+        paint_tab_glyph(ui.painter(), Tab::Versions, egui::pos2(head.left() + 8.0, head.center().y), 15.0, HY_ACCENT);
+        ui.painter().text(egui::pos2(head.left() + 24.0, head.center().y), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(13.0), HY_TEXT);
         let count = format!("{}", self.instances.len());
-        ui.painter().text(egui::pos2(head.left() + 92.0, head.center().y), egui::Align2::LEFT_CENTER, &count, sub_font(13.0), HY_MUTED);
-        let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 72.0, head.top() + 1.0), egui::vec2(72.0, 28.0));
+        let badge = egui::Rect::from_center_size(egui::pos2(head.left() + 118.0, head.center().y), egui::vec2(22.0, 18.0));
+        ui.painter().rect_filled(badge, 6.0, egui::Color32::from_rgba_unmultiplied(0xF2, 0xB8, 0x4B, 36));
+        ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, &count, nav_font(11.0), HY_ACCENT);
+        let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 86.0, head.top() + 3.0), egui::vec2(86.0, 28.0));
         if opaque_button(ui, new_btn, "NEW", true) {
             self.draft_name.clear();
             self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
             self.draft_open = true;
         }
-        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 8.0, head.bottom() + 4.0), egui::pos2(col.right() - 8.0, col.bottom() - 6.0));
+        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 10.0, head.bottom() + 6.0), egui::pos2(col.right() - 10.0, col.bottom() - 8.0));
         if self.instances.is_empty() {
             let btn = egui::Rect::from_center_size(list.center(), egui::vec2(220.0, 36.0));
             ui.painter().text(egui::pos2(list.center().x, list.center().y - 28.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), HY_MUTED);
@@ -64,27 +67,27 @@ impl super::super::Desktop {
         egui::ScrollArea::vertical().id_salt("spec-instances").auto_shrink([false, false]).show(&mut child, |ui| {
             ui.set_width(list.width());
             for inst in &rows {
-                let (slot, _) = ui.allocate_exact_size(egui::vec2(list.width(), 58.0), Sense::hover());
-                ui.add_space(6.0);
+                let (slot, _) = ui.allocate_exact_size(egui::vec2(list.width(), 64.0), Sense::hover());
+                ui.add_space(8.0);
                 let rect = slot;
                 let on = self.instance_id == inst.id;
                 let picked = ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("inst-card").with(&inst.id), on, 0.18));
                 paint_opaque_card(ui.painter(), rect, picked);
-                let icon = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 11.0), egui::vec2(36.0, 36.0));
+                let icon = egui::Rect::from_min_size(rect.min + egui::vec2(12.0, 14.0), egui::vec2(36.0, 36.0));
                 if let Some(tex) = self.loader_icon_for(&inst.loader) {
                     ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
-                let select = egui::Rect::from_min_size(egui::pos2(rect.right() - 138.0, rect.top() + 14.0), egui::vec2(68.0, 30.0));
-                let delete = egui::Rect::from_min_size(egui::pos2(rect.right() - 64.0, rect.top() + 14.0), egui::vec2(54.0, 30.0));
+                let select = egui::Rect::from_min_size(egui::pos2(rect.right() - 196.0, rect.top() + 16.0), egui::vec2(104.0, 32.0));
+                let delete = egui::Rect::from_min_size(egui::pos2(rect.right() - 84.0, rect.top() + 16.0), egui::vec2(72.0, 32.0));
                 let name = ellipsize(ui.painter(), &inst.name, title_font(16.0), select.left() - icon.right() - 20.0);
-                let name_ink = lerp_color(HY_TEXT, HY_ACCENT, ease_out(ui.ctx().animate_bool_with_time(egui::Id::new("inst-card").with(&inst.id), on, 0.18)));
-                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 20.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), name_ink);
-                let sub = format!("{} · {}", inst.version, crate::state::loader_label(&inst.loader));
-                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 38.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &sub, sub_font(13.0), select.left() - icon.right() - 20.0), sub_font(13.0), HY_MUTED);
-                if opaque_button(ui, select, if on { "Selected" } else { "Select" }, on) {
+                let name_ink = lerp_color(HY_TEXT, HY_ACCENT, picked);
+                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 22.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), name_ink);
+                let sub = format!("{} · {}", inst.version, crate::state::loader_label(&inst.loader).to_uppercase());
+                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 42.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &sub, sub_font(12.0), select.left() - icon.right() - 20.0), sub_font(12.0), HY_MUTED);
+                if action_button(ui, select, if on { "SELECTED" } else { "SELECT" }, if on { BtnKind::Outline } else { BtnKind::Quiet }) {
                     pick = Some(inst.id.clone());
                 }
-                if red_button(ui, delete, "Delete") {
+                if red_button(ui, delete, "DELETE") {
                     drop_id = Some(inst.id.clone());
                 }
             }
@@ -98,11 +101,12 @@ impl super::super::Desktop {
     }
 
     pub(crate) fn paint_loader_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
-        let head = egui::Rect::from_min_size(col.min + egui::vec2(8.0, 4.0), egui::vec2(col.width() - 16.0, 32.0));
-        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), HY_ACCENT);
+        let head = egui::Rect::from_min_size(col.min + egui::vec2(10.0, 8.0), egui::vec2(col.width() - 18.0, 36.0));
+        paint_tab_glyph(ui.painter(), Tab::Versions, egui::pos2(head.left() + 8.0, head.center().y), 14.0, HY_ACCENT);
+        ui.painter().text(egui::pos2(head.left() + 24.0, head.center().y), egui::Align2::LEFT_CENTER, "LOADER", nav_font(13.0), HY_TEXT);
         let mc = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
-        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &mc, sub_font(12.0), HY_LINK);
-        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 3.0, head.bottom() + 2.0), egui::pos2(col.right() - 3.0, col.bottom() - 6.0));
+        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &mc, sub_font(12.0), HY_MUTED);
+        let list = egui::Rect::from_min_max(egui::pos2(col.left() + 8.0, head.bottom() + 4.0), egui::pos2(col.right() - 8.0, col.bottom() - 8.0));
         let rows = crate::loaders::rows_for(&mc, &self.loaders);
         if !self.loaders.ready && rows.iter().all(|r| r.id == "vanilla" || r.version.is_empty()) {
             for i in 0..5 {
@@ -115,9 +119,10 @@ impl super::super::Desktop {
         let forge_on = self.loader == "forge" || self.loader == "forge+optifine";
         let any_on = rows.iter().any(|r| self.loader_active(r.id));
         let mut clicked: Option<String> = None;
+        let stride = (list.height() / rows.len().max(1) as f32).clamp(46.0, 62.0);
         for (i, row) in rows.iter().enumerate() {
-            let y = list.top() + i as f32 * 48.0;
-            let rect = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 42.0));
+            let y = list.top() + i as f32 * stride;
+            let rect = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), stride - 6.0));
             let missing = matches!(row.kind, crate::loaders::Badge::Preview) && row.version.is_empty();
             let on = self.loader_active(row.id);
             let pair = row.id == "optifine" && forge_on && !on;
@@ -132,8 +137,12 @@ impl super::super::Desktop {
             } else {
                 paint_mixed_card(ui.painter(), rect, on_t, fade_t);
             }
-            let switch = egui::Rect::from_min_size(egui::pos2(rect.right() - 48.0, rect.center().y - 8.0), egui::vec2(40.0, 16.0));
+            let switch = egui::Rect::from_min_size(egui::pos2(rect.right() - 52.0, rect.center().y - 9.0), egui::vec2(42.0, 18.0));
             let warn = egui::Rect::from_min_size(egui::pos2(switch.left() - 4.0 - 16.0, rect.center().y - 8.0), egui::vec2(16.0, 16.0));
+            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 20.0, rect.center().y), egui::vec2(22.0, 22.0));
+            if let Some(tex) = self.loader_icon_id(row.id) {
+                ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            }
             if missing {
                 paint_warn(ui.painter(), warn.center());
             }
@@ -151,8 +160,8 @@ impl super::super::Desktop {
             };
             let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
             let detail_ink = if pair { egui::Color32::from_rgb(0xA7, 0x8B, 0xFA) } else { HY_MUTED };
-            ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 15.0), egui::Align2::LEFT_CENTER, row.name, title_font(14.0), ink);
-            ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), (text_right - rect.left() - 12.0).max(24.0)), sub_font(11.0), detail_ink);
+            ui.painter().text(egui::pos2(rect.left() + 38.0, rect.center().y - 8.0), egui::Align2::LEFT_CENTER, row.name, title_font(13.0), ink);
+            ui.painter().text(egui::pos2(rect.left() + 38.0, rect.center().y + 8.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), (text_right - rect.left() - 42.0).max(24.0)), sub_font(11.0), detail_ink);
         }
         if let Some(id) = clicked {
             self.toggle_loader(&id);
@@ -170,9 +179,10 @@ impl super::super::Desktop {
             let parts: Vec<String> = chosen.iter().map(|r| if r.version.is_empty() { r.name.to_string() } else { format!("{} {}", r.name, r.version) }).collect();
             format!("{} on {name} · Minecraft {mc}", parts.join(" + "))
         };
-        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 18.0), egui::Align2::LEFT_CENTER, "WILL INSTALL", nav_font(11.0), HY_ACCENT);
-        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 40.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &plan, body_font(15.0), foot.width() - 210.0), body_font(15.0), HY_TEXT);
-        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 168.0, foot.top() + 16.0), egui::vec2(152.0, 36.0));
+        paint_tab_glyph(ui.painter(), Tab::Versions, egui::pos2(foot.left() + 22.0, foot.center().y), 16.0, HY_ACCENT);
+        ui.painter().text(egui::pos2(foot.left() + 40.0, foot.top() + 22.0), egui::Align2::LEFT_CENTER, "WILL INSTALL", nav_font(11.0), HY_ACCENT);
+        ui.painter().text(egui::pos2(foot.left() + 40.0, foot.top() + 42.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &plan, body_font(14.0), foot.width() - 230.0), body_font(14.0), HY_TEXT);
+        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 168.0, foot.center().y - 18.0), egui::vec2(150.0, 36.0));
         let active = chosen.iter().find(|r| r.id != "optifine").cloned();
         let raw = self.install_label(active.as_ref());
         let (label, enabled) = if raw == "INSTALL" {
