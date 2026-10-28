@@ -28,6 +28,14 @@ const MUTED: egui::Color32 = egui::Color32::from_rgb(0xB4, 0xC2, 0xD4);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3B, 0x82, 0xF6);
 const ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
 const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xCA, 0x54);
+const SPEC_YELLOW: egui::Color32 = egui::Color32::from_rgb(0xF6, 0xC4, 0x45);
+const SPEC_TEXT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xF5, 0xFF);
+const SPEC_MUTED: egui::Color32 = egui::Color32::from_rgb(0xA9, 0xB8, 0xDD);
+const SPEC_GREEN: egui::Color32 = egui::Color32::from_rgb(0x7F, 0xE0, 0x8B);
+const SPEC_PANEL: egui::Color32 = egui::Color32::from_rgb(0x16, 0x25, 0x5A);
+const SPEC_EDGE: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x55, 0x99);
+const SPEC_ITEM: egui::Color32 = egui::Color32::from_rgb(0x1B, 0x2D, 0x63);
+const SPEC_SEL: egui::Color32 = egui::Color32::from_rgb(0x26, 0x41, 0x8A);
 fn glass_fill() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(12, 22, 40, 228) }
 fn glass_hover() -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(22, 38, 64, 236) }
 const ERR: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xA0, 0x98);
@@ -138,6 +146,10 @@ struct Desktop {
     drop_hover: bool,
     instances: Vec<crate::instances::Instance>,
     instance_id: String,
+    pack_tab: u8,
+    row_focus: usize,
+    confirm_remove: Option<String>,
+    pending_pack: Option<std::path::PathBuf>,
     draft_open: bool,
     draft_name: String,
     draft_version: String,
@@ -233,6 +245,10 @@ impl Desktop {
             drop_hover: false,
             instances: Vec::new(),
             instance_id: String::new(),
+            pack_tab: 0,
+            row_focus: 0,
+            confirm_remove: None,
+            pending_pack: None,
             draft_open: false,
             draft_name: String::new(),
             draft_version,
@@ -801,9 +817,8 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        if self.tab == Tab::Versions {
-            // Whole version page: blue box, 4% transparent over the wallpaper.
-            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(36, 62, 112, 245));
+        if self.tab == Tab::Versions || self.tab == Tab::Mods {
+            paint_spec_page(ui.painter(), full);
         }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
@@ -820,11 +835,17 @@ impl Desktop {
         match self.tab {
             Tab::Home => self.paint_chrome(ui, full),
             Tab::Versions => self.paint_version_page(ui, full),
-            Tab::Mods => self.page_in_panel(ui, full, Page::Mods),
+            Tab::Mods => self.paint_mods_page(ui, full),
             Tab::Settings => self.page_in_panel(ui, full, Page::Settings),
         }
         if self.draft_open {
             self.paint_instance_popup(ui, full);
+        }
+        if self.confirm_remove.is_some() {
+            self.paint_remove_confirm(ui, full);
+        }
+        if self.pending_pack.is_some() {
+            self.paint_pack_prompt(ui, full);
         }
     }
 
@@ -869,20 +890,12 @@ impl Desktop {
         }
         let total: f32 = widths.iter().sum();
         let bar = egui::Rect::from_min_size(egui::pos2(left, uy(full, 16.0)), egui::vec2(total, h));
-        paint_hytale_bar(ui.painter(), bar);
-
         let mut x = bar.left();
         for (i, tab) in tabs.into_iter().enumerate() {
             let rect = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(widths[i], h));
             let hit = ui.interact(rect, egui::Id::new("hynav").with(tab.label()), Sense::click());
             let on = self.tab == tab;
-            let color = if on {
-                GOLD
-            } else if hit.hovered() {
-                egui::Color32::WHITE
-            } else {
-                egui::Color32::from_rgb(236, 228, 214)
-            };
+            let color = if on { SPEC_YELLOW } else { egui::Color32::WHITE };
             if tab == Tab::Home {
                 paint_nav_house(ui.painter(), rect.center(), h * 0.28, color);
             } else {
@@ -901,20 +914,18 @@ impl Desktop {
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
+            if on {
+                let underline = egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + 8.0, rect.bottom() - 3.0),
+                    egui::pos2(rect.right() - 8.0, rect.bottom()),
+                );
+                ui.painter().rect_filled(underline, 1.0, SPEC_YELLOW);
+            }
             if hit.clicked() {
                 self.tab = tab;
             }
             hit.on_hover_text(tab.label());
             x += widths[i];
-        }
-        let sep_h = us(full, 52.0) * 0.44;
-        let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("tab-seps")));
-        let mut sx = bar.left();
-        for (i, width) in widths.iter().enumerate() {
-            if i > 0 {
-                paint_tab_sep(&fg, sx, bar.center().y - sep_h * 0.5, sep_h);
-            }
-            sx += width;
         }
         bar
     }
@@ -1020,7 +1031,8 @@ impl Desktop {
             egui::pos2(ux(full, 22.0), uy(full, 16.0)),
             egui::vec2(pad + head_s + 8.0 + text_w + 12.0, h),
         );
-        paint_hytale_bar(ui.painter(), bar);
+        ui.painter().rect_filled(bar, 5.0, SPEC_PANEL);
+        ui.painter().rect_stroke(bar, 5.0, egui::Stroke::new(1.0, SPEC_EDGE), egui::StrokeKind::Inside);
         let head = egui::Rect::from_center_size(
             egui::pos2(bar.left() + pad + head_s * 0.5, bar.center().y),
             egui::vec2(head_s, head_s),
@@ -1405,10 +1417,562 @@ impl Desktop {
     }
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let veil = drect(full, 26.0, 96.0, 1228.0, 608.0);
-        paint_gold_bar(ui.painter(), ux(full, 746.0), veil.top() + 16.0, veil.height() - 32.0);
-        self.paint_version_list(ui, full);
-        self.paint_loader_panel(ui, full);
+        let content = spec_content(full);
+        let left = egui::Rect::from_min_size(content.min, egui::vec2(360.0, content.height() - 72.0));
+        let right = egui::Rect::from_min_max(
+            egui::pos2(left.right() + 12.0, content.top()),
+            egui::pos2(content.right(), left.bottom()),
+        );
+        let foot = egui::Rect::from_min_max(
+            egui::pos2(content.left(), left.bottom() + 10.0),
+            content.right_bottom(),
+        );
+        self.paint_instance_column(ui, left);
+        self.paint_loader_column(ui, right);
+        self.paint_instance_foot(ui, foot);
+        if !self.instances.is_empty() && self.confirm_remove.is_none() && self.pending_pack.is_none() {
+            let ids: Vec<String> = self.instances.iter().map(|i| i.id.clone()).collect();
+            let mut idx = ids.iter().position(|id| id == &self.instance_id).unwrap_or(0);
+            let down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+            let up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+            if down { idx = (idx + 1).min(ids.len() - 1); }
+            if up { idx = idx.saturating_sub(1); }
+            if (down || up) && ids.get(idx).is_some() {
+                self.select_instance(&ids[idx]);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                self.on_install();
+            }
+        }
+    }
+
+    fn paint_instance_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
+        let head = egui::Rect::from_min_size(col.min, egui::vec2(col.width(), 36.0));
+        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), SPEC_MUTED);
+        let count = format!("{}", self.instances.len());
+        ui.painter().text(egui::pos2(head.left() + 92.0, head.center().y), egui::Align2::LEFT_CENTER, &count, sub_font(13.0), SPEC_TEXT);
+        let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 84.0, head.top() + 2.0), egui::vec2(84.0, 32.0));
+        if spec_button(ui, new_btn, "NEW", true) {
+            self.draft_name.clear();
+            self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
+            self.draft_open = true;
+        }
+        let list = egui::Rect::from_min_max(egui::pos2(col.left(), head.bottom() + 8.0), col.right_bottom());
+        if self.instances.is_empty() {
+            let btn = egui::Rect::from_center_size(list.center(), egui::vec2(240.0, 44.0));
+            ui.painter().text(egui::pos2(list.center().x, list.center().y - 36.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), SPEC_MUTED);
+            if spec_button(ui, btn, "Create your first instance", true) {
+                self.draft_open = true;
+            }
+            return;
+        }
+        let rows: Vec<crate::instances::Instance> = self.instances.clone();
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
+        child.set_clip_rect(list);
+        egui::ScrollArea::vertical().id_salt("spec-instances").auto_shrink([false, false]).show(&mut child, |ui| {
+            ui.set_width(list.width());
+            for inst in &rows {
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(list.width(), 64.0), Sense::click());
+                ui.add_space(8.0);
+                let on = self.instance_id == inst.id;
+                spec_card(ui.painter(), rect, on);
+                let icon = egui::Rect::from_min_size(rect.min + egui::vec2(12.0, 14.0), egui::vec2(36.0, 36.0));
+                if let Some(tex) = self.loader_icon_for(&inst.loader) {
+                    ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                }
+                let name = ellipsize(ui.painter(), &inst.name, title_font(16.0), rect.width() - 92.0);
+                ui.painter().text(egui::pos2(icon.right() + 12.0, rect.top() + 22.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), if on { SPEC_YELLOW } else { SPEC_TEXT });
+                let sub = format!("{} · {}", inst.version, crate::state::loader_label(&inst.loader));
+                ui.painter().text(egui::pos2(icon.right() + 12.0, rect.top() + 42.0), egui::Align2::LEFT_CENTER, &sub, sub_font(13.0), SPEC_MUTED);
+                if on {
+                    ui.painter().circle_filled(egui::pos2(rect.right() - 16.0, rect.center().y), 4.5, SPEC_GREEN);
+                }
+                if resp.clicked() {
+                    self.select_instance(&inst.id);
+                }
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                }
+            }
+        });
+    }
+
+    fn paint_loader_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
+        let head = egui::Rect::from_min_size(col.min, egui::vec2(col.width(), 36.0));
+        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), SPEC_MUTED);
+        let for_mc = format!("for Minecraft {}", if self.selected.is_empty() { "26.3" } else { self.selected.as_str() });
+        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &for_mc, sub_font(13.0), SPEC_YELLOW);
+        let list = egui::Rect::from_min_max(egui::pos2(col.left(), head.bottom() + 8.0), col.right_bottom());
+        let mc = self.selected.clone();
+        let rows = crate::loaders::rows_for(&mc, &self.loaders);
+        if !self.loaders.ready && rows.iter().all(|r| r.id == "vanilla" || r.version.is_empty()) {
+            for i in 0..5 {
+                let y = list.top() + i as f32 * 52.0;
+                let row = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 44.0));
+                ui.painter().rect_filled(row, 5.0, SPEC_ITEM);
+            }
+            return;
+        }
+        let mut clicked: Option<String> = None;
+        for (i, row) in rows.iter().enumerate() {
+            let y = list.top() + i as f32 * 52.0;
+            let rect = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 44.0));
+            let missing = matches!(row.kind, crate::loaders::Badge::Preview) && row.version.is_empty();
+            let on = self.loader_active(row.id);
+            if missing {
+                paint_dashed_rect(ui.painter(), rect, SPEC_MUTED);
+            } else {
+                spec_card(ui.painter(), rect, on);
+            }
+            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), egui::vec2(28.0, 28.0));
+            if let Some(tex) = self.loader_icon_id(row.id) {
+                ui.painter().image(tex.id(), icon, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            }
+            let ink = if missing { SPEC_MUTED } else if on { SPEC_YELLOW } else { SPEC_TEXT };
+            ui.painter().text(egui::pos2(rect.left() + 48.0, rect.center().y), egui::Align2::LEFT_CENTER, row.name, title_font(16.0), ink);
+            let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
+            ui.painter().text(egui::pos2(rect.left() + 168.0, rect.center().y), egui::Align2::LEFT_CENTER, &detail, body_font(13.0), SPEC_MUTED);
+            let badge_ink = if matches!(row.kind, crate::loaders::Badge::Preview) { SPEC_YELLOW } else { SPEC_GREEN };
+            ui.painter().text(egui::pos2(rect.right() - 14.0, rect.center().y), egui::Align2::RIGHT_CENTER, row.badge, nav_font(11.0), badge_ink);
+            if !missing {
+                let hit = ui.interact(rect, egui::Id::new("spec-loader").with(row.id), Sense::click());
+                if hit.clicked() {
+                    clicked = Some(row.id.to_string());
+                }
+                if hit.hovered() {
+                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                }
+            }
+        }
+        if let Some(id) = clicked {
+            self.choose_loader(&id);
+        }
+    }
+
+    fn paint_instance_foot(&mut self, ui: &mut egui::Ui, foot: egui::Rect) {
+        ui.painter().rect_filled(foot, 5.0, SPEC_PANEL);
+        ui.painter().rect_stroke(foot, 5.0, egui::Stroke::new(1.0, SPEC_EDGE), egui::StrokeKind::Inside);
+        let name = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| "None".into());
+        let mc = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+        let rows = crate::loaders::rows_for(&mc, &self.loaders);
+        let active = rows.iter().find(|r| self.loader_active(r.id)).cloned();
+        let loader = active.as_ref().map(|r| r.name).unwrap_or("Vanilla");
+        let ver = active.as_ref().map(|r| r.version.as_str()).unwrap_or("");
+        let line = format!("{name} · {loader} {ver} · {mc}");
+        ui.painter().text(egui::pos2(foot.left() + 16.0, foot.center().y), egui::Align2::LEFT_CENTER, &line, body_font(15.0), SPEC_TEXT);
+        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 196.0, foot.top() + 10.0), egui::vec2(180.0, foot.height() - 20.0));
+        let raw = self.install_label(active.as_ref());
+        let (label, primary, enabled) = if raw == "INSTALL" {
+            ("INSTALL LOADER", true, true)
+        } else if raw == "INSTALLED" {
+            ("USE", false, false)
+        } else {
+            ("UNAVAILABLE", false, false)
+        };
+        if spec_button(ui, btn, label, primary) && enabled {
+            self.on_install();
+        }
+    }
+
+    fn paint_mods_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let content = spec_content(full);
+        let right = egui::Rect::from_min_max(egui::pos2(content.right() - 290.0, content.top()), content.right_bottom());
+        let left = egui::Rect::from_min_max(content.left_top(), egui::pos2(right.left() - 12.0, content.bottom()));
+        spec_panel(ui.painter(), left);
+        spec_panel(ui.painter(), right);
+        let inst = self.current_instance().map(|i| i.name.clone()).unwrap_or_else(|| "No instance".into());
+        ui.painter().text(egui::pos2(left.left() + 16.0, left.top() + 22.0), egui::Align2::LEFT_CENTER, &inst, title_font(18.0), SPEC_TEXT);
+        let tabs = ["Mods", "Resource packs", "Shader packs"];
+        let counts = [
+            self.scan_mods().len(),
+            self.scan_packs("resourcepacks").len(),
+            self.scan_packs("shaderpacks").len(),
+        ];
+        let mut x = left.left() + 16.0;
+        let tab_y = left.top() + 48.0;
+        for (i, label) in tabs.iter().enumerate() {
+            let text = format!("{label} {}", counts[i]);
+            let w = ui.painter().layout_no_wrap(text.clone(), nav_font(13.0), SPEC_TEXT).size().x + 20.0;
+            let rect = egui::Rect::from_min_size(egui::pos2(x, tab_y), egui::vec2(w, 32.0));
+            let hit = ui.interact(rect, egui::Id::new("pack-tab").with(i), Sense::click());
+            let on = self.pack_tab as usize == i;
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &text, nav_font(13.0), if on { SPEC_YELLOW } else { SPEC_TEXT });
+            if on {
+                ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 3.0), rect.right_bottom()), 1.0, SPEC_YELLOW);
+            }
+            if hit.clicked() {
+                self.pack_tab = i as u8;
+            }
+            x += w + 8.0;
+        }
+        let loader = crate::state::loader_label(&self.loader);
+        let enabled = self.scan_mods().iter().filter(|m| m.1).count();
+        let summary = format!("{inst} · {loader} · {enabled} enabled");
+        ui.painter().text(egui::pos2(left.left() + 16.0, left.top() + 96.0), egui::Align2::LEFT_CENTER, &summary, sub_font(13.0), SPEC_MUTED);
+        let path_bar = egui::Rect::from_min_max(egui::pos2(left.left() + 12.0, left.bottom() - 48.0), egui::pos2(left.right() - 12.0, left.bottom() - 10.0));
+        let list = egui::Rect::from_min_max(egui::pos2(left.left() + 12.0, left.top() + 112.0), egui::pos2(left.right() - 12.0, path_bar.top() - 8.0));
+        if self.pack_tab == 0 && (self.loader == "vanilla" || self.loader.is_empty()) {
+            ui.painter().text(egui::pos2(list.left() + 8.0, list.top() + 8.0), egui::Align2::LEFT_TOP, "Mods need Forge, Fabric, or NeoForge.", sub_font(13.0), SPEC_YELLOW);
+            let go = egui::Rect::from_min_size(egui::pos2(list.left() + 8.0, list.top() + 28.0), egui::vec2(140.0, 32.0));
+            if spec_button(ui, go, "Choose loader", true) {
+                self.tab = Tab::Versions;
+            }
+        }
+        self.take_drops(ui);
+        let entries = self.pack_entries();
+        if !entries.is_empty() {
+            let n = entries.len();
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                self.row_focus = (self.row_focus + 1).min(n - 1);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                self.row_focus = self.row_focus.saturating_sub(1);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Space)) {
+                if let Some((name, on, _)) = entries.get(self.row_focus) {
+                    self.set_pack_enabled(name, !on);
+                }
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+                if let Some((name, _, _)) = entries.get(self.row_focus) {
+                    self.confirm_remove = Some(name.clone());
+                }
+            }
+        }
+        let mut toggled: Option<String> = None;
+        let mut removed: Option<String> = None;
+        let mut pick = false;
+        if entries.is_empty() {
+            paint_dashed_rect(ui.painter(), list.shrink(8.0), SPEC_MUTED);
+            ui.painter().text(list.center() + egui::vec2(0.0, -12.0), egui::Align2::CENTER_CENTER, "Drop files here", body_font(16.0), SPEC_TEXT);
+            let choose = egui::Rect::from_center_size(list.center() + egui::vec2(0.0, 18.0), egui::vec2(132.0, 32.0));
+            if spec_button(ui, choose, "Choose files", false) {
+                pick = true;
+            }
+        } else {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
+            child.set_clip_rect(list);
+            let focus = self.row_focus;
+            egui::ScrollArea::vertical().id_salt("spec-packs").auto_shrink([false, false]).show_rows(&mut child, 44.0, entries.len(), |ui, range| {
+                for i in range {
+                    let (name, on, size) = &entries[i];
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(list.width(), 40.0), Sense::hover());
+                    spec_card(ui.painter(), rect, i == focus);
+                    let shown = display_pack_name(name);
+                    let shown = ellipsize(ui.painter(), &shown, body_font(14.0), rect.width() - 210.0);
+                    let ink = if *on { SPEC_TEXT } else { SPEC_MUTED };
+                    let tick = egui::Rect::from_center_size(egui::pos2(rect.left() + 20.0, rect.center().y), egui::vec2(16.0, 16.0));
+                    paint_check(ui.painter(), tick, *on);
+                    let hit = ui.interact(tick.expand(6.0), egui::Id::new("mod-on").with(name), Sense::click());
+                    if hit.clicked() {
+                        toggled = Some(name.clone());
+                    }
+                    ui.painter().text(egui::pos2(rect.left() + 40.0, rect.center().y), egui::Align2::LEFT_CENTER, &shown, body_font(14.0), ink);
+                    ui.painter().text(egui::pos2(rect.right() - 96.0, rect.center().y), egui::Align2::RIGHT_CENTER, &format_bytes(*size), sub_font(12.0), SPEC_MUTED);
+                    let rm = egui::Rect::from_min_size(egui::pos2(rect.right() - 78.0, rect.top() + 6.0), egui::vec2(66.0, 28.0));
+                    if spec_button(ui, rm, "Remove", false) {
+                        removed = Some(name.clone());
+                    }
+                    let row_hit = ui.interact(rect, egui::Id::new("pack-row").with(name), Sense::click());
+                    if row_hit.hovered() {
+                        row_hit.on_hover_text(name);
+                    }
+                }
+            });
+        }
+        if let Some(name) = toggled {
+            let on = entries.iter().find(|(n, _, _)| n == &name).map(|e| e.1).unwrap_or(true);
+            self.set_pack_enabled(&name, !on);
+        }
+        if let Some(name) = removed {
+            self.confirm_remove = Some(name);
+        }
+        if pick {
+            self.pick_pack_file();
+        }
+        let folder = match self.pack_tab {
+            1 => "resourcepacks",
+            2 => "shaderpacks",
+            _ => "mods",
+        };
+        let path = self.pack_dir(folder);
+        ui.painter().text(egui::pos2(path_bar.left() + 8.0, path_bar.center().y), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &path.display().to_string(), sub_font(12.0), path_bar.width() - 210.0), sub_font(12.0), SPEC_MUTED);
+        let copy = egui::Rect::from_min_size(egui::pos2(path_bar.right() - 188.0, path_bar.top() + 4.0), egui::vec2(88.0, 28.0));
+        let open = egui::Rect::from_min_size(egui::pos2(path_bar.right() - 92.0, path_bar.top() + 4.0), egui::vec2(84.0, 28.0));
+        if spec_button(ui, copy, "Copy path", false) {
+            ui.output_mut(|o| o.copied_text = path.display().to_string());
+            self.notice = "Path copied".into();
+        }
+        if spec_button(ui, open, "Open folder", false) {
+            let _ = std::fs::create_dir_all(&path);
+            if let Err(e) = crate::dialog::open_dir(&path) { self.notice = e; }
+        }
+        let kinds = ["Modpack", "Mod", "Resource pack", "Shader pack"];
+        let mut y = right.top() + 16.0;
+        for (i, label) in kinds.iter().enumerate() {
+            let btn = egui::Rect::from_min_size(egui::pos2(right.left() + 16.0, y), egui::vec2(right.width() - 32.0, 56.0));
+            if spec_button(ui, btn, label, false) {
+                self.install_kind(i as u8);
+            }
+            y += 68.0;
+        }
+        ui.painter().text(
+            egui::pos2(right.center().x, y + 8.0),
+            egui::Align2::CENTER_TOP,
+            "Drop files anywhere on this page",
+            sub_font(13.0),
+            SPEC_MUTED,
+        );
+    }
+
+    fn pack_dir(&self, folder: &str) -> std::path::PathBuf {
+        if self.instance_id.is_empty() {
+            self.app.game_dir(&self.selected).join(folder)
+        } else {
+            crate::instances::dir(&self.app, &self.instance_id).join(folder)
+        }
+    }
+
+    fn scan_packs(&self, folder: &str) -> Vec<(String, u64)> {
+        let mut out = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(self.pack_dir(folder)) {
+            for entry in rd.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') { continue; }
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                out.push((name, size));
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    fn pack_entries(&self) -> Vec<(String, bool, u64)> {
+        match self.pack_tab {
+            1 => self.scan_packs("resourcepacks").into_iter().map(|(n, s)| { let on = !n.ends_with(".disabled"); (n, on, s) }).collect(),
+            2 => self.scan_packs("shaderpacks").into_iter().map(|(n, s)| { let on = !n.ends_with(".disabled"); (n, on, s) }).collect(),
+            _ => self.scan_mods(),
+        }
+    }
+
+    fn scan_mods(&self) -> Vec<(String, bool, u64)> {
+        let mut out = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(self.pack_dir("mods")) {
+            for entry in rd.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let lower = name.to_ascii_lowercase();
+                let enabled = lower.ends_with(".jar");
+                if !enabled && !lower.ends_with(".jar.disabled") { continue; }
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                out.push((name, enabled, size));
+            }
+        }
+        out.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()));
+        out
+    }
+
+    fn pack_folder(&self) -> &'static str {
+        match self.pack_tab {
+            1 => "resourcepacks",
+            2 => "shaderpacks",
+            _ => "mods",
+        }
+    }
+
+    fn set_pack_enabled(&mut self, name: &str, enable: bool) {
+        let dir = self.pack_dir(self.pack_folder());
+        let src = dir.join(name);
+        let dest_name = if enable { name.trim_end_matches(".disabled").to_string() } else if name.ends_with(".disabled") { name.to_string() } else { format!("{name}.disabled") };
+        let dest = dir.join(safe_leaf(&dest_name).unwrap_or_else(|| "file.disabled".into()));
+        if src != dest && src.exists() {
+            if let Err(e) = std::fs::rename(&src, &dest) {
+                self.notice = e.to_string();
+            }
+        }
+    }
+
+    fn trash_pack(&mut self, name: &str) {
+        let leaf = match safe_leaf(name) {
+            Some(n) => n,
+            None => { self.notice = "That file name is not safe.".into(); return; }
+        };
+        let dir = self.pack_dir(self.pack_folder());
+        let src = dir.join(&leaf);
+        let trash = dir.join(".trash");
+        let _ = std::fs::create_dir_all(&trash);
+        let dest = trash.join(&leaf);
+        match std::fs::rename(&src, &dest) {
+            Ok(()) => self.notice = format!("Moved {leaf} to trash"),
+            Err(e) => self.notice = e.to_string(),
+        }
+    }
+
+    fn install_kind(&mut self, kind: u8) {
+        if kind != 3 {
+            self.pack_tab = kind;
+        }
+        let (title, filter) = match kind {
+            1 => ("Resource pack", "*.zip"),
+            2 => ("Shader pack", "*.zip"),
+            3 => ("Modpack", "*.zip"),
+            _ => ("Add a mod", "*.jar"),
+        };
+        let Some(path) = crate::dialog::pick_file(title, filter) else {
+            self.notice = "No file chosen.".into();
+            return;
+        };
+        if kind == 3 {
+            self.pending_pack = Some(path);
+            return;
+        }
+        self.import_into(kind, &path);
+    }
+
+    fn pick_pack_file(&mut self) {
+        self.install_kind(self.pack_tab);
+    }
+
+    fn take_drops(&mut self, ui: &egui::Ui) {
+        let dropped = ui.input(|i| i.raw.dropped_files.clone());
+        for file in dropped {
+            let Some(path) = file.path else { continue };
+            match classify_drop(&path) {
+                3 => self.pending_pack = Some(path),
+                kind => self.import_into(kind, &path),
+            }
+        }
+    }
+
+    fn import_into(&mut self, kind: u8, path: &std::path::Path) {
+        if kind == 0 && (self.loader == "vanilla" || self.loader.is_empty()) {
+            self.notice = "This jar was added, but mods need Forge, Fabric, or NeoForge.".into();
+        }
+        let folder = match kind {
+            1 => "resourcepacks",
+            2 => "shaderpacks",
+            _ => "mods",
+        };
+        let Some(leaf) = path.file_name().and_then(|n| safe_leaf(&n.to_string_lossy())) else {
+            self.notice = "That file name is not safe.".into();
+            return;
+        };
+        if kind == 0 && !leaf.to_ascii_lowercase().ends_with(".jar") {
+            self.notice = "Only a .jar can be added as a mod.".into();
+            return;
+        }
+        let dest_dir = self.pack_dir(folder);
+        let _ = std::fs::create_dir_all(&dest_dir);
+        let dest = dest_dir.join(&leaf);
+        if dest.exists() {
+            self.notice = format!("{leaf} is already there. It was not overwritten.");
+            return;
+        }
+        match std::fs::copy(path, &dest) {
+            Ok(_) => {
+                if self.notice.is_empty() || !self.notice.contains("need") {
+                    self.notice = format!("Added {leaf}");
+                }
+            }
+            Err(e) => self.notice = e.to_string(),
+        }
+    }
+
+    fn paint_remove_confirm(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let Some(name) = self.confirm_remove.clone() else { return };
+        ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(120));
+        let box_rect = egui::Rect::from_center_size(full.center(), egui::vec2(420.0, 160.0));
+        spec_panel(ui.painter(), box_rect);
+        ui.painter().text(egui::pos2(box_rect.left() + 20.0, box_rect.top() + 28.0), egui::Align2::LEFT_CENTER, "Move this file to trash?", title_font(16.0), SPEC_TEXT);
+        ui.painter().text(egui::pos2(box_rect.left() + 20.0, box_rect.top() + 58.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &name, body_font(14.0), 380.0), body_font(14.0), SPEC_MUTED);
+        let cancel = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 220.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 36.0));
+        let ok = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 112.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 36.0));
+        if spec_button(ui, cancel, "Cancel", false) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.confirm_remove = None;
+        }
+        if spec_button(ui, ok, "Remove", true) || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            self.trash_pack(&name);
+            self.confirm_remove = None;
+        }
+    }
+
+    fn paint_pack_prompt(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let Some(path) = self.pending_pack.clone() else { return };
+        ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(120));
+        let box_rect = egui::Rect::from_center_size(full.center(), egui::vec2(460.0, 180.0));
+        spec_panel(ui.painter(), box_rect);
+        ui.painter().text(egui::pos2(box_rect.left() + 20.0, box_rect.top() + 28.0), egui::Align2::LEFT_CENTER, "Install this modpack?", title_font(16.0), SPEC_TEXT);
+        ui.painter().text(egui::pos2(box_rect.left() + 20.0, box_rect.top() + 56.0), egui::Align2::LEFT_CENTER, "New instance is the safe default. Nothing is overwritten.", sub_font(13.0), SPEC_MUTED);
+        let cancel = egui::Rect::from_min_size(egui::pos2(box_rect.left() + 20.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 36.0));
+        let apply = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 292.0, box_rect.bottom() - 52.0), egui::vec2(140.0, 36.0));
+        let fresh = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 140.0, box_rect.bottom() - 52.0), egui::vec2(120.0, 36.0));
+        if spec_button(ui, cancel, "Cancel", false) {
+            self.pending_pack = None;
+        }
+        if spec_button(ui, apply, "Apply here", false) {
+            self.apply_pack(&path);
+            self.pending_pack = None;
+        }
+        if spec_button(ui, fresh, "New instance", true) {
+            self.store_pack_as_instance(&path);
+            self.pending_pack = None;
+        }
+    }
+
+    fn store_pack_as_instance(&mut self, path: &std::path::Path) {
+        let stem = path.file_stem().and_then(|s| safe_leaf(&s.to_string_lossy())).unwrap_or_else(|| "Pack".into());
+        let inst = crate::instances::create(&stem, &self.selected, &self.loader);
+        let dir = crate::instances::dir(&self.app, &inst.id).join("modpacks");
+        let _ = std::fs::create_dir_all(&dir);
+        let leaf = path.file_name().and_then(|n| safe_leaf(&n.to_string_lossy())).unwrap_or_else(|| "pack.zip".into());
+        match std::fs::copy(path, dir.join(&leaf)) {
+            Ok(_) => {
+                self.instances.push(inst.clone());
+                crate::instances::save(&self.app, &self.instances);
+                self.select_instance(&inst.id);
+                self.notice = format!("Stored {leaf} in a new instance. It was not applied.");
+            }
+            Err(e) => self.notice = e.to_string(),
+        }
+    }
+
+    fn apply_pack(&mut self, path: &std::path::Path) {
+        let dest = self.pack_dir("mods");
+        let _ = std::fs::create_dir_all(&dest);
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) => { self.notice = e.to_string(); return; }
+        };
+        let mut zip = match zip::ZipArchive::new(file) {
+            Ok(z) => z,
+            Err(e) => { self.notice = format!("Could not open the pack: {e}"); return; }
+        };
+        let mut added = 0usize;
+        let mut skipped = 0usize;
+        for i in 0..zip.len() {
+            let mut entry = match zip.by_index(i) { Ok(e) => e, Err(_) => continue };
+            if entry.is_dir() { continue; }
+            let raw = entry.name().replace('\\', "/");
+            if raw.split('/').any(|p| p == ".." || p.is_empty() && false) || raw.contains("..") {
+                self.notice = "The pack had an unsafe path and was not applied.".into();
+                return;
+            }
+            let Some(leaf) = std::path::Path::new(&raw).file_name().and_then(|n| safe_leaf(&n.to_string_lossy())) else { continue };
+            if !leaf.to_ascii_lowercase().ends_with(".jar") { continue; }
+            let target = dest.join(&leaf);
+            if target.exists() { skipped += 1; continue; }
+            let mut out = match std::fs::File::create(&target) { Ok(f) => f, Err(e) => { self.notice = e.to_string(); return; } };
+            if std::io::copy(&mut entry, &mut out).is_err() {
+                let _ = std::fs::remove_file(&target);
+                self.notice = format!("{leaf} was incomplete, so it was not kept.");
+                return;
+            }
+            added += 1;
+        }
+        self.notice = format!("Added {added} mods. Kept {skipped} existing files.");
+    }
+
+    fn loader_icon_for(&self, id: &str) -> Option<&egui::TextureHandle> {
+        self.loader_icon_id(id)
     }
 
     fn paint_version_list(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
@@ -3491,6 +4055,140 @@ fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) 
 }
 
 /// Same two install colors, blended top to bottom instead of a hard split.
+fn spec_content(full: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(egui::pos2(16.0, 64.0), egui::pos2(full.right() - 16.0, full.bottom() - 12.0))
+}
+
+fn paint_spec_page(painter: &egui::Painter, rect: egui::Rect) {
+    paint_vgradient(
+        painter,
+        rect,
+        0.0,
+        egui::Color32::from_rgb(0x1A, 0x2A, 0x5C),
+        egui::Color32::from_rgb(0x12, 0x1C, 0x3F),
+    );
+}
+
+fn spec_panel(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 6.0, SPEC_PANEL);
+    painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0, SPEC_EDGE), egui::StrokeKind::Inside);
+}
+
+fn spec_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
+    painter.rect_filled(rect, 5.0, if selected { SPEC_SEL } else { SPEC_ITEM });
+    painter.rect_stroke(
+        rect,
+        5.0,
+        egui::Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { SPEC_YELLOW } else { SPEC_EDGE }),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn paint_check(painter: &egui::Painter, rect: egui::Rect, on: bool) {
+    painter.rect_stroke(rect, 3.0, egui::Stroke::new(1.5, if on { SPEC_YELLOW } else { SPEC_MUTED }), egui::StrokeKind::Inside);
+    if on {
+        let a = egui::pos2(rect.left() + 3.0, rect.center().y);
+        let b = egui::pos2(rect.left() + 6.5, rect.bottom() - 3.5);
+        let c = egui::pos2(rect.right() - 3.0, rect.top() + 4.0);
+        let stroke = egui::Stroke::new(2.0, SPEC_YELLOW);
+        painter.line_segment([a, b], stroke);
+        painter.line_segment([b, c], stroke);
+    }
+}
+
+fn display_pack_name(name: &str) -> String {
+    name.trim_end_matches(".disabled").to_string()
+}
+
+fn safe_leaf(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') || name.contains('\0') {
+        return None;
+    }
+    let clean: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '+' || c == ' ' { c } else { '_' }).collect();
+    let clean = clean.trim_matches('.').to_string();
+    if clean.is_empty() { None } else { Some(clean) }
+}
+
+fn classify_drop(path: &std::path::Path) -> u8 {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext == "jar" { return 0; }
+    if path.is_dir() {
+        if path.join("pack.mcmeta").exists() { return 1; }
+        if path.join("shaders").is_dir() { return 2; }
+        return 1;
+    }
+    if ext != "zip" { return 3; }
+    let Ok(file) = std::fs::File::open(path) else { return 3 };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else { return 3 };
+    let mut kind = 3u8;
+    for i in 0..zip.len().min(80) {
+        let Ok(entry) = zip.by_index(i) else { continue };
+        let name = entry.name().replace('\\', "/");
+        if name.ends_with("pack.mcmeta") { return 1; }
+        if name.contains("shaders/") { kind = 2; }
+        if name.ends_with("modrinth.index.json") || name.ends_with("manifest.json") { kind = 3; }
+    }
+    kind
+}
+
+fn spec_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("spec-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
+    let fill = if primary { SPEC_YELLOW } else if hit.hovered() { SPEC_SEL } else { SPEC_ITEM };
+    let edge = if primary { SPEC_YELLOW } else { SPEC_EDGE };
+    ui.painter().rect_filled(rect, 5.0, fill);
+    ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        nav_font(13.0),
+        if primary { egui::Color32::from_rgb(0x1A, 0x14, 0x04) } else { SPEC_TEXT },
+    );
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
+}
+
+fn paint_dashed_rect(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.0, color);
+    let dash = 6.0;
+    let gap = 4.0;
+    let step = dash + gap;
+    let edges = [
+        (rect.left_top(), rect.right_top(), egui::vec2(1.0, 0.0)),
+        (rect.right_top(), rect.right_bottom(), egui::vec2(0.0, 1.0)),
+        (rect.right_bottom(), rect.left_bottom(), egui::vec2(-1.0, 0.0)),
+        (rect.left_bottom(), rect.left_top(), egui::vec2(0.0, -1.0)),
+    ];
+    for (start, end, dir) in edges {
+        let len = start.distance(end);
+        let mut t = 0.0;
+        while t < len {
+            let a = start + dir * t;
+            let b = start + dir * (t + dash).min(len);
+            painter.line_segment([a, b], stroke);
+            t += step;
+        }
+    }
+}
+
+fn ellipsize(painter: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -> String {
+    if painter.layout_no_wrap(text.to_string(), font.clone(), SPEC_TEXT).size().x <= max_w {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    for ch in text.chars() {
+        let next = format!("{out}{ch}…");
+        if painter.layout_no_wrap(next, font.clone(), SPEC_TEXT).size().x > max_w {
+            break;
+        }
+        out.push(ch);
+    }
+    if out.is_empty() { "…".into() } else { format!("{out}…") }
+}
+
 fn paint_vgradient(painter: &egui::Painter, rect: egui::Rect, radius: f32, top: egui::Color32, bot: egui::Color32) {
     let steps = 24;
     for i in 0..steps {
