@@ -1081,8 +1081,12 @@ impl Desktop {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
             }
         }
-        let player = self.paint_player_bar(ui, full);
-        self.paint_shared_tabs(ui, full, player.right() + 10.0);
+        if self.tab == Tab::Home {
+            self.paint_home_rail(ui, full);
+        } else {
+            let player = self.paint_player_bar(ui, full);
+            self.paint_shared_tabs(ui, full, player.right() + 10.0);
+        }
         self.paint_title_logo(ui, full);
         self.paint_exit(ui, full);
         let now = ui.input(|i| i.time);
@@ -1133,8 +1137,8 @@ impl Desktop {
         let paper = self.paper_for(&self.selected);
         if let Some(tex) = self.papers.get(paper.title) {
             ui.painter().rect_filled(full, 0.0, BG);
-            let fitted = contain_rect(tex.size_vec2(), full);
-            ui.painter().image(tex.id(), fitted, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            // One official image, drawn at the window size. No wash, no crop.
+            ui.painter().image(tex.id(), full, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         } else {
             ui.painter().rect_filled(full, 0.0, BG);
             ui.painter().text(

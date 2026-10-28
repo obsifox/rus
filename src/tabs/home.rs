@@ -20,9 +20,74 @@ impl super::super::Desktop {
         }
     }
 
+    /// Narrow black rail. Profile is the start, Settings is the end.
+    pub(crate) fn paint_home_rail(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let rail = egui::Rect::from_min_size(full.left_top(), egui::vec2(58.0, full.height()));
+        ui.painter().rect_filled(rail, 0.0, egui::Color32::from_rgb(8, 8, 10));
+        ui.painter().vline(
+            rail.right() - 0.5,
+            rail.top()..=rail.bottom(),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 32, 36)),
+        );
+        let name = if self.username.is_empty() { "Player".to_string() } else { self.username.clone() };
+        let head_s = 32.0;
+        let head = egui::Rect::from_center_size(egui::pos2(rail.center().x, 18.0 + head_s * 0.5), egui::vec2(head_s, head_s));
+        let profile = ui.interact(head.expand(4.0), egui::Id::new("rail-profile"), Sense::click());
+        if let Some(face) = &self.avatar {
+            ui.painter().add(
+                egui::epaint::RectShape::filled(head, 8.0, egui::Color32::WHITE)
+                    .with_texture(face.id(), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))),
+            );
+        } else {
+            ui.painter().rect_filled(head, 8.0, egui::Color32::from_rgb(0x1A, 0x14, 0x10));
+        }
+        if profile.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if profile.clicked() {
+            self.tab = Tab::Settings;
+        }
+        profile.on_hover_text(name);
+
+        let mut y = 84.0;
+        for tab in [Tab::Home, Tab::Versions, Tab::Mods] {
+            let rect = egui::Rect::from_center_size(egui::pos2(rail.center().x, y), egui::vec2(42.0, 36.0));
+            let hit = ui.interact(rect, egui::Id::new("rail-tab").with(tab.label()), Sense::click());
+            let on = self.tab == tab;
+            let color = if on { GOLD } else if hit.hovered() { egui::Color32::WHITE } else { egui::Color32::from_rgb(196, 200, 206) };
+            if on {
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(egui::pos2(rail.left(), rect.center().y - 10.0), egui::vec2(2.0, 20.0)),
+                    1.0,
+                    GOLD,
+                );
+            }
+            paint_tab_glyph(ui.painter(), tab, rect.center(), 16.0, color);
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if hit.clicked() {
+                self.tab = tab;
+            }
+            hit.on_hover_text(tab.label());
+            y += 44.0;
+        }
+
+        let gear = egui::Rect::from_center_size(egui::pos2(rail.center().x, full.bottom() - 22.0), egui::vec2(36.0, 36.0));
+        let settings = ui.interact(gear, egui::Id::new("rail-settings"), Sense::click());
+        let gear_ink = if settings.hovered() { GOLD } else { egui::Color32::from_rgb(210, 214, 220) };
+        paint_tab_glyph(ui.painter(), Tab::Settings, gear.center(), 16.0, gear_ink);
+        if settings.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if settings.clicked() {
+            self.tab = Tab::Settings;
+        }
+        settings.on_hover_text("Settings");
+    }
+
     pub(crate) fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let horizon_on = self.engine == "horizon";
-        self.paint_recent_servers(ui, full);
         self.paint_instance_card(ui, full);
 
         let play_h = 50.0;
@@ -83,7 +148,7 @@ impl super::super::Desktop {
         let h = 78.0;
         let w = h * aspect;
         let rect = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 42.0 - w, full.top() + 8.0),
+            egui::pos2(full.right() - 48.0 - w, full.top() + 16.0),
             egui::vec2(w, h),
         );
         ui.painter().image(
@@ -113,8 +178,9 @@ impl super::super::Desktop {
         let h = 50.0;
         let icon = 26.0;
         let w = 12.0 + icon + 10.0 + text_w + 16.0 + 18.0 + 8.0 + time_w + 16.0 + 18.0 + 8.0 + tail_w + 14.0;
-        let card = egui::Rect::from_min_size(egui::pos2(16.0, full.bottom() - 28.0 - h), egui::vec2(w, h));
-        paint_glass_chip(ui.painter(), card, 10.0, 214);
+        let card = egui::Rect::from_min_size(egui::pos2(74.0, full.bottom() - 28.0 - h), egui::vec2(w, h));
+        ui.painter().rect_filled(card, 10.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 214));
+        ui.painter().rect_stroke(card, 10.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(28)), egui::StrokeKind::Inside);
         let icon_rect = egui::Rect::from_center_size(egui::pos2(card.left() + 12.0 + icon * 0.5, card.center().y), egui::vec2(icon, icon));
         if let Some(tex) = self.loader_icon() {
             ui.painter().image(tex.id(), icon_rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
