@@ -3244,74 +3244,45 @@ fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
     paint_corner_caps(painter, rect, edge);
 }
 
-/// Version-page element: castle corners only. No fill and no full stroke.
+/// Version-page element: the previous corner caps, a smaller cap inside each
+/// corner, and a short designed mark on each side. No full stroke.
 fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
-    let stone = if on {
-        egui::Color32::from_rgb(244, 202, 84)
-    } else {
-        egui::Color32::from_rgb(232, 222, 196)
-    };
-    let course = if on {
-        egui::Color32::from_rgb(176, 132, 48)
-    } else {
-        egui::Color32::from_rgb(154, 140, 112)
-    };
-    let m = rect.width().min(rect.height());
-    // Small chips keep a short turret so the label stays clear.
-    let (tower, tooth, count) = if m < 32.0 {
-        (5.0, 3.0, 1)
-    } else {
-        (7.0, 3.0, 2)
-    };
+    let color = if on { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    let stroke = egui::Stroke::new(1.15, color);
+    let small = rect.height().min(rect.width()) < 30.0;
+    let leg = if small { 5.0 } else { 6.0 };
+    let inner = if small { 3.0 } else { 4.0 };
+    let gap = 3.0;
+    let side = 5.0;
     let corners = [
-        (rect.left().round(), rect.top().round(), 1.0, 1.0),
-        ((rect.right() - 1.0).round(), rect.top().round(), -1.0, 1.0),
-        (rect.left().round(), (rect.bottom() - 1.0).round(), 1.0, -1.0),
-        ((rect.right() - 1.0).round(), (rect.bottom() - 1.0).round(), -1.0, -1.0),
+        (rect.left() + 1.0, rect.top() + 1.0, 1.0, 1.0, rect.width(), rect.height()),
+        (rect.right() - 1.0, rect.top() + 1.0, -1.0, 1.0, rect.width(), rect.height()),
+        (rect.left() + 1.0, rect.bottom() - 1.0, 1.0, -1.0, rect.width(), rect.height()),
+        (rect.right() - 1.0, rect.bottom() - 1.0, -1.0, -1.0, rect.width(), rect.height()),
     ];
-    for (x, y, sx, sy) in corners {
-        paint_castle_corner(painter, x, y, sx, sy, tower, tooth, count, stone, course);
-    }
-}
-
-fn paint_castle_corner(
-    painter: &egui::Painter,
-    x: f32,
-    y: f32,
-    sx: f32,
-    sy: f32,
-    tower: f32,
-    tooth: f32,
-    count: i32,
-    stone: egui::Color32,
-    course: egui::Color32,
-) {
-    let gap = 2.0;
-    let thick = 2.0;
-    let span = count as f32 * tooth + (count - 1).max(0) as f32 * gap;
-    let map = |lx: f32, ly: f32, lw: f32, lh: f32| {
-        let x0 = (x + sx * lx).round();
-        let y0 = (y + sy * ly).round();
-        let x1 = (x + sx * (lx + lw)).round();
-        let y1 = (y + sy * (ly + lh)).round();
-        egui::Rect::from_min_max(egui::pos2(x0.min(x1), y0.min(y1)), egui::pos2(x0.max(x1), y0.max(y1)))
-    };
-    let fill = |lx: f32, ly: f32, lw: f32, lh: f32, color: egui::Color32| {
-        let block = map(lx, ly, lw, lh);
-        if block.width() >= 1.0 && block.height() >= 1.0 {
-            painter.rect_filled(block, 0.0, color);
+    for (x, y, sx, sy, along_x, along_y) in corners {
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x + sx * leg, y)], stroke);
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + sy * leg)], stroke);
+        let ix = x + sx * (leg + gap);
+        let iy = y + sy * (leg + gap);
+        if ix > rect.left() + 2.0 && ix < rect.right() - 2.0 && iy > rect.top() + 2.0 && iy < rect.bottom() - 2.0 {
+            painter.line_segment([egui::pos2(ix, iy), egui::pos2(ix + sx * inner, iy)], stroke);
+            painter.line_segment([egui::pos2(ix, iy), egui::pos2(ix, iy + sy * inner)], stroke);
         }
-    };
-    // Corner turret, then a crenellated curtain wall on each arm.
-    fill(0.0, 0.0, tower, tower, stone);
-    fill(1.0, 1.0, tower - 2.0, 1.0, course);
-    for i in 0..count {
-        let at = tower + gap + i as f32 * (tooth + gap);
-        fill(at, 0.0, tooth, tooth, stone);
-        fill(0.0, at, tooth, tooth, stone);
+        let dash = leg + gap + 2.0;
+        if along_x > (dash + side) * 2.0 + 10.0 {
+            painter.line_segment(
+                [egui::pos2(x + sx * dash, y), egui::pos2(x + sx * (dash + side), y)],
+                stroke,
+            );
+        }
+        if along_y > (dash + side) * 2.0 + 10.0 {
+            painter.line_segment(
+                [egui::pos2(x, y + sy * dash), egui::pos2(x, y + sy * (dash + side))],
+                stroke,
+            );
+        }
     }
-    fill(tower, tooth, span + gap, thick, course);
-    fill(tooth, tower, thick, span + gap, course);
 }
 
 /// One element, one template. Slightly open so the wallpaper still shows through.
