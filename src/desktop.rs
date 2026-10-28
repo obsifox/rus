@@ -99,6 +99,13 @@ enum Msg {
     Mods(Vec<(String, bool, u64)>),
     Loaders(crate::loaders::Catalog),
     Fabric(String, String),
+    FabricFail { mc: String, missing: bool },
+    Explore(u64, Vec<crate::explore::Hit>),
+    ExploreErr(u64, String),
+    ExploreDetail(u64, crate::explore::Detail),
+    ExploreDetailErr(u64, String),
+    ExploreIcon { id: String, bytes: Vec<u8> },
+    ExploreDone(crate::explore::Outcome),
 }
 
 struct Desktop {
@@ -113,6 +120,8 @@ struct Desktop {
     loaders: crate::loaders::Catalog,
     loader_after: bool,
     fabric_wait: String,
+    fabric_fail: u8,
+    fabric_fail_mc: String,
     query: String,
     selected: String,
     papers: HashMap<String, egui::TextureHandle>,
@@ -162,6 +171,22 @@ struct Desktop {
     instances: Vec<crate::instances::Instance>,
     instance_id: String,
     pack_tab: u8,
+    mod_view: u8,
+    explore_loader: String,
+    explore_version: String,
+    explore_query: String,
+    explore_hits: Vec<crate::explore::Hit>,
+    explore_note: String,
+    explore_busy: bool,
+    explore_gen: u64,
+    explore_detail_gen: u64,
+    explore_open: Option<crate::explore::Detail>,
+    explore_optional: Vec<String>,
+    explore_icons: HashMap<String, egui::TextureHandle>,
+    explore_ver_open: bool,
+    explore_ver_skip: bool,
+    explore_installing: bool,
+    explore_dirty: bool,
     row_focus: usize,
     confirm_remove: Option<String>,
     confirm_instance: Option<String>,
@@ -220,6 +245,8 @@ impl Desktop {
             loaders: crate::loaders::Catalog::default(),
             loader_after: false,
             fabric_wait: String::new(),
+            fabric_fail: 0,
+            fabric_fail_mc: String::new(),
             query: String::new(),
             selected,
             papers: HashMap::new(),
@@ -268,7 +295,23 @@ impl Desktop {
             drop_hover: false,
             instances: Vec::new(),
             instance_id: String::new(),
-            pack_tab: 0,
+            pack_tab: 1,
+            mod_view: 0,
+            explore_loader: String::new(),
+            explore_version: String::new(),
+            explore_query: String::new(),
+            explore_hits: Vec::new(),
+            explore_note: String::new(),
+            explore_busy: false,
+            explore_gen: 0,
+            explore_detail_gen: 0,
+            explore_open: None,
+            explore_optional: Vec::new(),
+            explore_icons: HashMap::new(),
+            explore_ver_open: false,
+            explore_ver_skip: false,
+            explore_installing: false,
+            explore_dirty: false,
             row_focus: 0,
             confirm_remove: None,
             confirm_instance: None,
@@ -286,6 +329,23 @@ impl Desktop {
         spawn_mods(app.clone(), tx.clone());
         spawn_loaders(tx.clone());
         me.load_papers(&cc.egui_ctx);
+        if me.shot.is_some() && me.tab == Tab::Mods {
+            me.mod_view = 1;
+            me.explore_dirty = true;
+            me.pack_tab = 1;
+            me.loader = "fabric".into();
+            me.selected = "26.3".into();
+            me.explore_version = "26.3".into();
+            me.explore_loader = "fabric".into();
+            if let Ok(loader) = std::env::var("RUS_EXPLORE_LOADER") {
+                if matches!(loader.as_str(), "forge" | "fabric" | "neoforge") {
+                    me.explore_loader = loader;
+                }
+            }
+            if std::env::var("RUS_EXPLORE_POPUP").ok().as_deref() == Some("1") {
+                me.explore_query = "xaero".into();
+            }
+        }
         if me.shot.is_some() && me.tab == Tab::Versions {
             me.loader = "forge".into();
             me.selected = "26.3".into();
@@ -326,13 +386,50 @@ impl Desktop {
                     if self.fabric_wait == mc {
                         self.fabric_wait.clear();
                     }
+                    self.fabric_fail = 0;
                     self.loaders.fabric.retain(|(k, _)| k != &mc);
                     if !version.is_empty() {
                         self.loaders.fabric.push((mc, version));
-                    } else {
+                    }
+                }
+                Msg::FabricFail { mc, missing } => {
+                    if self.fabric_wait == mc {
+                        self.fabric_wait.clear();
+                    }
+                    if self.fabric_fail_mc != mc {
+                        self.fabric_fail_mc = mc.clone();
+                        self.fabric_fail = 0;
+                    }
+                    self.fabric_fail = self.fabric_fail.saturating_add(1);
+                    if missing || self.fabric_fail >= 3 {
+                        self.loaders.fabric.retain(|(k, _)| k != &mc);
                         self.loaders.fabric.push((mc, String::new()));
                     }
                 }
+                Msg::Explore(gen, hits) => self.on_explore(gen, hits),
+                Msg::ExploreErr(gen, err) => {
+                    if gen == self.explore_gen {
+                        self.explore_busy = false;
+                        self.explore_note = err;
+                    }
+                }
+                Msg::ExploreDetail(gen, detail) => self.on_explore_detail(gen, detail),
+                Msg::ExploreDetailErr(gen, err) => {
+                    if gen == self.explore_detail_gen {
+                        if let Some(open) = &mut self.explore_open {
+                            open.ready = true;
+                            open.missing = err;
+                        } else {
+                            self.explore_note = err;
+                        }
+                    }
+                }
+                Msg::ExploreIcon { id, bytes } => {
+                    if let Some(tex) = load_texture(ctx, &format!("explore-{id}"), &bytes) {
+                        self.explore_icons.insert(id, tex);
+                    }
+                }
+                Msg::ExploreDone(outcome) => self.on_explore_done(outcome),
                 Msg::Paper { title, bytes } => {
                     if let Some(tex) = load_texture(ctx, &title, &bytes) {
                         self.papers.insert(title, tex);
@@ -366,16 +463,31 @@ impl Desktop {
 
     fn ensure_fabric(&mut self) {
         let mc = self.selected.clone();
-        if mc.is_empty() || self.fabric_wait == mc || self.loaders.fabric.iter().any(|(k, _)| k == &mc) {
+        if mc.is_empty() || self.fabric_wait == mc {
+            return;
+        }
+        if self.loaders.fabric.iter().any(|(k, v)| k == &mc && !v.is_empty()) {
+            return;
+        }
+        if self.loaders.fabric.iter().any(|(k, v)| k == &mc && v.is_empty()) {
+            return;
+        }
+        if self.fabric_fail_mc != mc {
+            self.fabric_fail = 0;
+            self.fabric_fail_mc = mc.clone();
+        }
+        if self.fabric_fail >= 3 {
             return;
         }
         self.fabric_wait = mc.clone();
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            if let Ok(version) = crate::loaders::fetch_fabric(&mc) {
+        std::thread::spawn(move || match crate::loaders::fetch_fabric(&mc) {
+            Ok(version) => {
                 let _ = tx.send(Msg::Fabric(mc, version));
-            } else {
-                let _ = tx.send(Msg::Fabric(mc, String::new()));
+            }
+            Err(e) => {
+                let missing = e.contains("HTTP 400") || e.contains("No Fabric");
+                let _ = tx.send(Msg::FabricFail { mc, missing });
             }
         });
     }
@@ -845,7 +957,16 @@ impl eframe::App for Desktop {
         let paper_ready = self.papers.contains_key(self.paper_for(&self.selected).title);
         let versions_ready = !self.versions.is_empty() || self.frames > 40;
         let loaders_ready = self.loaders.ready && self.loaders.fabric.iter().any(|(k, v)| k == &self.selected && !v.is_empty());
-        if self.shot.is_some() && !self.shot_requested && self.frames > 8 && (paper_ready || self.frames > 90) && versions_ready && (loaders_ready || self.frames > 80) {
+        let explore_ready = self.tab != Tab::Mods || self.mod_view != 1 || self.explore_icons.len() >= 6 || self.frames > 360;
+        let popup_ready = if std::env::var("RUS_EXPLORE_POPUP").ok().as_deref() != Some("1") {
+            true
+        } else if let Some(d) = &self.explore_open {
+            let has_img = self.explore_icons.contains_key(&d.id) || self.explore_icons.contains_key(&format!("{}#shot", d.id));
+            (d.ready && has_img) || self.frames > 500
+        } else {
+            self.frames > 500
+        };
+        if self.shot.is_some() && !self.shot_requested && self.frames > 8 && (paper_ready || self.frames > 90) && versions_ready && (loaders_ready || self.frames > 160) && explore_ready && popup_ready {
             self.shot_requested = true;
             ctx.send_viewport_cmd(ViewportCommand::Screenshot(Default::default()));
         }
@@ -935,6 +1056,9 @@ impl Desktop {
         }
         if self.confirm_instance.is_some() {
             self.paint_instance_delete(ui, full);
+        }
+        if self.tab == Tab::Mods && self.explore_open.is_some() {
+            self.paint_explore_popup(ui, full);
         }
         if self.pending_pack.is_some() {
             self.paint_pack_prompt(ui, full);
@@ -1084,8 +1208,9 @@ impl Desktop {
 
     fn pack_entries(&self) -> Vec<(String, bool, u64)> {
         match self.pack_tab {
-            1 => self.scan_packs("resourcepacks").into_iter().map(|(n, s)| { let on = !n.ends_with(".disabled"); (n, on, s) }).collect(),
-            2 => self.scan_packs("shaderpacks").into_iter().map(|(n, s)| { let on = !n.ends_with(".disabled"); (n, on, s) }).collect(),
+            0 => self.scan_packs("modpacks").into_iter().map(|(n, s)| (n, true, s)).collect(),
+            2 => self.scan_packs("resourcepacks").into_iter().map(|(n, s)| { let on = !n.ends_with(".disabled"); (n, on, s) }).collect(),
+            3 => self.scan_packs("shaderpacks").into_iter().map(|(n, s)| { let on = !n.ends_with(".disabled"); (n, on, s) }).collect(),
             _ => self.scan_mods(),
         }
     }
@@ -1108,8 +1233,9 @@ impl Desktop {
 
     fn pack_folder(&self) -> &'static str {
         match self.pack_tab {
-            1 => "resourcepacks",
-            2 => "shaderpacks",
+            0 => "modpacks",
+            2 => "resourcepacks",
+            3 => "shaderpacks",
             _ => "mods",
         }
     }
@@ -1143,24 +1269,22 @@ impl Desktop {
     }
 
     fn install_kind(&mut self, kind: u8) {
-        if kind != 3 {
-            self.pack_tab = kind;
-        }
-        let (title, filter) = match kind {
-            1 => ("Resource pack", "*.zip"),
-            2 => ("Shader pack", "*.zip"),
-            3 => ("Modpack", "*.zip"),
-            _ => ("Add a mod", "*.jar"),
+        self.pack_tab = kind;
+        let (title, filter, import) = match kind {
+            0 => ("Modpack", "*.zip", 3u8),
+            2 => ("Resource pack", "*.zip", 1u8),
+            3 => ("Shader pack", "*.zip", 2u8),
+            _ => ("Add a mod", "*.jar", 0u8),
         };
         let Some(path) = crate::dialog::pick_file(title, filter) else {
             self.notice = "No file chosen.".into();
             return;
         };
-        if kind == 3 {
+        if kind == 0 {
             self.pending_pack = Some(path);
             return;
         }
-        self.import_into(kind, &path);
+        self.import_into(import, &path);
     }
 
     fn pick_pack_file(&mut self) {

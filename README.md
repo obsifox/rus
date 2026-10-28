@@ -47,7 +47,7 @@ These pictures are the Rus window itself, captured from the native program (`rus
 <td width="50%" valign="top"><img src="docs/settings.png" alt="Settings tab with username, memory, window size, snapshot toggle, Steve skin and the Rus cape" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, and a 3D skin preview. No Microsoft login.</sub></p></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/mods.png" alt="Mods tab, empty, pointing at the Rus mods folder" width="100%"><p align="center"><sub><b>Mods.</b> Drop a .jar, or add one from disk. Enabled ones are staged when you play.</sub></p></td>
+<td colspan="2"><img src="docs/mods.png" alt="Mod tab in Explore, listing Fabric mods for 26.3 from Modrinth" width="100%"><p align="center"><sub><b>Mods.</b> Installed files, or Explore on Modrinth. A project opens with its picture, description, and dependencies.</sub></p></td>
 </tr>
 </table>
 
@@ -69,8 +69,8 @@ These pictures are the Rus window itself, captured from the native program (`rus
 | **Instances** | Several isolated worlds of one version. New is an overlay on the window. Version files stay shared. The home card is not a button. Snapshots and previews from series 26 stay hidden until Settings turns them on. |
 | **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
 | **Play** | Vanilla Java client, or Horizon for 26.3. Both start outside the browser, inside the sandbox. |
-| **Loaders** | Vanilla is built in. Forge, Fabric and NeoForge show the official build for the selected version, then Install fetches it. OptiFine stays a preview when that version has no build. |
-| **Mods** | A folder of jars. Drop a `.jar` on the window, or add one from disk. Toggle, copy the path, or delete. Enabled ones are staged when you play. |
+| **Loaders** | Vanilla is built in. Forge, Fabric and NeoForge show the official build for every version that feed supports, then Install fetches it. OptiFine stays a preview when that version has no build. |
+| **Mods** | Installed files, or Explore on Modrinth. Categories are modpack, mods, resource packs, and shader packs. Explore filters by version and by Forge, Fabric, or NeoForge. A project opens with its name, picture, and description. Install includes required mods, and optional mods you choose. |
 
 You need your own copy of Minecraft. Rus downloads it from Mojang into `~/.rus` on Linux, or `%APPDATA%\Rus` on Windows.
 
@@ -91,6 +91,7 @@ src/raster.rs      CPU skin preview
 src/preview3d.rs   drag, zoom, and walk
 src/dialog.rs      native file picker and folder open
 src/loaders.rs     Forge, Fabric, NeoForge and OptiFine builds
+src/explore.rs     Modrinth search for the Mod page
 src/mods.rs        mod library
 src/play.rs        Java command line
 src/sandbox.rs     bubblewrap jail, or a Windows job object
@@ -126,7 +127,7 @@ The release is Rus Gate. Download it once.
 
 | Platform | File |
 | --- | --- |
-| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.01/rus-gate.exe) |
+| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.02/rus-gate.exe) |
 
 <p align="center">
   <img src="docs/gate.png" alt="Rus Gate, a solid-color install window" width="640">
@@ -136,7 +137,7 @@ Run `rus-gate.exe`. The window is one solid color, with no title bar. It asks wh
 
 `Rus Launcher.exe` does not show the install step. With a connection it reads **tags**, not the release list, downloads `rus_{version}.exe` from that tag's release, and starts it. With no connection it starts the installed build.
 
-Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.01`.
+Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.02`.
 
 Linux builds from source with `cargo build --release`. The published release is the Windows gate.
 

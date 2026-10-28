@@ -8,6 +8,7 @@
 mod product;
 mod desktop;
 mod dialog;
+mod explore;
 mod horizon;
 mod instances;
 mod install;

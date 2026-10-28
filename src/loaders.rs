@@ -71,9 +71,9 @@ pub fn rows_for(mc: &str, cat: &Catalog) -> Vec<LoaderRow> {
             badge: "BUILT-IN",
             kind: Badge::BuiltIn,
         },
-        row("forge", "Forge", forge),
-        row("fabric", "Fabric", fabric),
-        row("neoforge", "NeoForge", neo),
+        row("forge", "Forge", forge, mc),
+        row("fabric", "Fabric", fabric, mc),
+        row("neoforge", "NeoForge", neo, mc),
         LoaderRow {
             id: "optifine",
             name: "OptiFine",
@@ -85,7 +85,7 @@ pub fn rows_for(mc: &str, cat: &Catalog) -> Vec<LoaderRow> {
     ]
 }
 
-fn row(id: &'static str, name: &'static str, version: Option<String>) -> LoaderRow {
+fn row(id: &'static str, name: &'static str, version: Option<String>, mc: &str) -> LoaderRow {
     match version {
         Some(version) => LoaderRow {
             detail: version.clone(),
@@ -99,7 +99,7 @@ fn row(id: &'static str, name: &'static str, version: Option<String>) -> LoaderR
             id,
             name,
             version: String::new(),
-            detail: String::new(),
+            detail: missing_line(mc),
             badge: "PREVIEW",
             kind: Badge::Preview,
         },
@@ -197,7 +197,45 @@ pub fn fetch_shared() -> Result<Catalog, String> {
             }
         }
     }
+    // Fabric's game list is the support list. Pair every listed game with the
+    // newest stable loader so a version is not "missing" until a per-version
+    // request happens to succeed. A failed request must not become the catalog.
+    match (
+        net::get_json("https://meta.fabricmc.net/v2/versions/loader"),
+        net::get_json("https://meta.fabricmc.net/v2/versions/game"),
+    ) {
+        (Ok(loaders), Ok(games)) => cat.fabric = fabric_pairs(&loaders, &games),
+        (Err(e), _) | (_, Err(e)) => {
+            if cat.note.is_empty() {
+                cat.note = e;
+            }
+        }
+    }
     Ok(cat)
+}
+
+/// Newest stable loader, then every game Fabric lists. Empty loader versions
+/// are not stored, so a network miss cannot be painted as "no build".
+pub fn fabric_pairs(loaders: &Value, games: &Value) -> Vec<(String, String)> {
+    let loader = loaders.as_array().and_then(|arr| {
+        arr.iter()
+            .find(|e| e.get("stable").and_then(|s| s.as_bool()).unwrap_or(false))
+            .or_else(|| arr.first())
+            .and_then(|e| e.get("version").and_then(|s| s.as_str()))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    });
+    let Some(loader) = loader else { return Vec::new() };
+    let Some(arr) = games.as_array() else { return Vec::new() };
+    let mut out = Vec::new();
+    for g in arr {
+        let ver = g.get("version").and_then(|s| s.as_str()).unwrap_or("");
+        if ver.is_empty() {
+            continue;
+        }
+        out.push((ver.to_string(), loader.clone()));
+    }
+    out
 }
 
 pub fn fetch_fabric(mc: &str) -> Result<String, String> {
@@ -446,5 +484,24 @@ mod tests {
         assert_eq!(neoforge_for("26.1", &versions).as_deref(), Some("26.1.0.40"));
         assert_eq!(neoforge_for("1.21.11", &versions).as_deref(), Some("21.11.48"));
         assert_eq!(neoforge_for("1.21.1", &versions).as_deref(), Some("21.1.265"));
+    }
+
+    #[test]
+    fn fabric_catalog_covers_listed_games() {
+        let loaders = json!([
+            {"version": "0.19.0", "stable": false},
+            {"version": "0.20.1", "stable": true}
+        ]);
+        let games = json!([
+            {"version": "26.4-snapshot-6", "stable": false},
+            {"version": "26.3", "stable": true},
+            {"version": "1.21.1", "stable": true},
+            {"version": "", "stable": true}
+        ]);
+        let pairs = fabric_pairs(&loaders, &games);
+        assert_eq!(fabric_for("26.3", &pairs).as_deref(), Some("0.20.1"));
+        assert_eq!(fabric_for("1.21.1", &pairs).as_deref(), Some("0.20.1"));
+        assert_eq!(fabric_for("26.4-snapshot-6", &pairs).as_deref(), Some("0.20.1"));
+        assert_eq!(fabric_for("1.12.2", &pairs), None);
     }
 }
