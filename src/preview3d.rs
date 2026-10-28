@@ -62,6 +62,7 @@ impl SkinPreview {
             ui.set_max_width(148.0);
             let size = egui::vec2(148.0, 132.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+            paint_preview_template(ui.painter(), rect);
             let anim = self.auto_rotate || self.walk;
             if anim {
                 let dt = ui.input(|i| i.stable_dt).min(0.05);
@@ -190,7 +191,8 @@ fn model_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
 }
 
 fn text_hit(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(52.0, 22.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(52.0, 24.0), egui::Sense::click());
+    paint_preview_template(ui.painter(), rect);
     let ink = if on {
         egui::Color32::from_rgb(0xF4, 0xCA, 0x54)
     } else {
@@ -210,15 +212,39 @@ fn gold_tick(ui: &mut egui::Ui) {
 }
 
 fn toggle(ui: &mut egui::Ui, value: &mut bool, label: &str, dirty: &mut bool) {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(80.0), 20.0), egui::Sense::click());
+    let font = egui::FontId::proportional(12.0);
+    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), egui::Color32::WHITE).size().x;
+    let w = (text_w + 16.0).min(ui.available_width().max(48.0));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::click());
+    paint_preview_template(ui.painter(), rect);
     let ink = if *value {
         egui::Color32::from_rgb(0xF4, 0xCA, 0x54)
     } else {
         egui::Color32::WHITE
     };
-    ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.0), ink);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, ink);
     if resp.clicked() {
         *value = !*value;
         *dirty = true;
+    }
+}
+
+fn paint_preview_template(painter: &egui::Painter, rect: egui::Rect) {
+    let fill = egui::Color32::from_rgba_unmultiplied(36, 62, 112, 226);
+    let edge = egui::Color32::from_rgb(196, 214, 232);
+    painter.rect_filled(rect, 1.5, fill);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    let stroke = egui::Stroke::new(1.15, edge);
+    let leg = 5.0;
+    let inset = 1.5;
+    let corners = [
+        (rect.left() + inset, rect.top() + inset, 1.0, 1.0),
+        (rect.right() - inset, rect.top() + inset, -1.0, 1.0),
+        (rect.left() + inset, rect.bottom() - inset, 1.0, -1.0),
+        (rect.right() - inset, rect.bottom() - inset, -1.0, -1.0),
+    ];
+    for (x, y, sx, sy) in corners {
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x + sx * leg, y)], stroke);
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + sy * leg)], stroke);
     }
 }
