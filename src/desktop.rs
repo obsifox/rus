@@ -18,7 +18,7 @@ mod tabs;
 
 const WINDOW_W: f32 = 960.0;
 const WINDOW_H: f32 = 540.0;
-pub(crate) const HOME_RAIL: f32 = 72.0;
+pub(crate) const HOME_RAIL: f32 = 112.0;
 
 const HY_BG: egui::Color32 = egui::Color32::from_rgb(0x15, 0x24, 0x3A);
 const HY_SURFACE: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x2F, 0x4B);
@@ -125,6 +125,8 @@ struct Desktop {
     rx: Receiver<Msg>,
     tab: Tab,
     home_pane: u8,
+    home_menu: bool,
+    rail_nudge: f32,
     versions: Vec<Ver>,
     versions_note: String,
     version_latest: String,
@@ -253,6 +255,8 @@ impl Desktop {
             rx,
             tab: Tab::from_name(&tab),
             home_pane: 0,
+            home_menu: false,
+            rail_nudge: 0.0,
             versions: Vec::new(),
             versions_note: "Loading versions…".into(),
             version_latest: String::new(),
@@ -1091,7 +1095,7 @@ impl Desktop {
             let player = self.paint_player_bar(ui, full);
             self.paint_shared_tabs(ui, full, player.right() + 10.0);
         }
-        if self.tab != Tab::Home || self.home_pane == 0 {
+        if self.tab != Tab::Home || !self.home_menu {
             self.paint_title_logo(ui, full);
         }
         self.paint_exit(ui, full);
@@ -1102,11 +1106,25 @@ impl Desktop {
         }
         match self.tab {
             Tab::Home => {
-                if self.home_pane == 1 {
-                    self.paint_mods_page(ui, full);
-                } else {
-                    self.paint_version_instances(ui, full);
-                    self.paint_chrome(ui, full);
+                self.paint_chrome(ui, full);
+                if self.home_menu {
+                    if ui.input(|i| i.pointer.any_click()) {
+                        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                            let pop = self.home_popup_rect(full);
+                            let switch = egui::Rect::from_min_size(egui::pos2(HOME_RAIL + 10.0, 52.0), egui::vec2(220.0, 32.0));
+                            if !pop.contains(pos) && !switch.contains(pos) && !self.loader_hit_rect().contains(pos) {
+                                self.home_menu = false;
+                            }
+                        }
+                    }
+                }
+                if self.home_menu {
+                    if self.home_pane == 1 {
+                        self.paint_mods_page(ui, full);
+                    } else {
+                        self.paint_version_instances(ui, full);
+                    }
+                    self.paint_home_switch(ui, full);
                 }
             }
             Tab::Versions => self.paint_version_page(ui, full),
@@ -1563,8 +1581,8 @@ pub(crate) fn paint_download_bar(painter: &egui::Painter, rect: egui::Rect, frac
     }
 }
 
-fn play_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, stop: bool, horizon: bool) -> bool {
-    let hit = ui.interact(rect, egui::Id::new("play"), Sense::click());
+fn play_button(ui: &mut egui::Ui, id: &str, rect: egui::Rect, label: &str, stop: bool, horizon: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
     let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.12);
     let (fill, edge, ink) = if stop {
         (

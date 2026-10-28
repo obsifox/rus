@@ -5,10 +5,7 @@ use super::super::*;
 impl super::super::Desktop {
     pub(crate) fn paint_mods_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let content = if self.tab == Tab::Home {
-            egui::Rect::from_min_max(
-                egui::pos2(HOME_RAIL + 10.0, 56.0),
-                egui::pos2(full.right() - 14.0, full.bottom() - 12.0),
-            )
+            self.home_popup_rect(full)
         } else {
             spec_content(full)
         };

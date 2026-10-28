@@ -20,7 +20,18 @@ impl super::super::Desktop {
         }
     }
 
-    /// Black rail. Profile at the start, version squares in the middle, Settings at the end.
+    pub(crate) fn loader_hit_rect(&self) -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(HOME_RAIL + 10.0, 12.0), egui::vec2(32.0, 32.0))
+    }
+
+    pub(crate) fn home_popup_rect(&self, full: egui::Rect) -> egui::Rect {
+        egui::Rect::from_min_max(
+            egui::pos2(HOME_RAIL + 10.0, 90.0),
+            egui::pos2((HOME_RAIL + 520.0).min(full.right() - 16.0), full.bottom() - 96.0),
+        )
+    }
+
+    /// Black rail. Uninstalled versions stay gray on the left. Installed ones sit on the right.
     pub(crate) fn paint_home_rail(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let rail = egui::Rect::from_min_size(full.left_top(), egui::vec2(HOME_RAIL, full.height()));
         ui.painter().rect_filled(rail, 0.0, egui::Color32::from_rgb(8, 8, 10));
@@ -49,44 +60,35 @@ impl super::super::Desktop {
         }
         profile.on_hover_text(name);
 
-        let list = egui::Rect::from_min_max(egui::pos2(rail.left(), 56.0), egui::pos2(rail.right(), full.bottom() - 46.0));
-        let versions = self.rail_versions();
-        let mut pick = None;
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
-        child.set_clip_rect(list);
-        egui::ScrollArea::vertical().id_salt("ver-rail").auto_shrink([false, false]).show(&mut child, |ui| {
-            ui.set_width(list.width());
-            for id in &versions {
-                let (slot, _) = ui.allocate_exact_size(egui::vec2(list.width(), 68.0), Sense::hover());
-                let square = egui::Rect::from_center_size(egui::pos2(slot.center().x, slot.top() + 26.0), egui::vec2(48.0, 48.0));
-                let on = self.selected == *id || (self.selected.is_empty() && id == "26.3");
-                let paper = self.paper_for(id);
-                if let Some(tex) = self.papers.get(paper.title) {
-                    let uv = cover_uv(tex.size_vec2(), square);
-                    ui.painter().image(tex.id(), square, uv, egui::Color32::WHITE);
-                } else {
-                    ui.painter().rect_filled(square, 4.0, egui::Color32::from_rgb(22, 24, 28));
-                }
-                let edge = if on { GOLD } else { egui::Color32::from_white_alpha(40) };
-                ui.painter().rect_stroke(square, 4.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
-                let label = ellipsize(ui.painter(), id, sub_font(10.0), rail.width() - 8.0);
-                ui.painter().text(
-                    egui::pos2(slot.center().x, slot.bottom() - 7.0),
-                    egui::Align2::CENTER_CENTER,
-                    &label,
-                    sub_font(10.0),
-                    if on { egui::Color32::WHITE } else { HY_MUTED },
-                );
-                let hit = ui.interact(slot, egui::Id::new("ver-sq").with(id), Sense::click());
-                if hit.hovered() {
-                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                }
-                if hit.clicked() {
-                    pick = Some(id.clone());
-                }
-                hit.on_hover_text(id);
+        let up = egui::Rect::from_center_size(egui::pos2(rail.center().x, 58.0), egui::vec2(36.0, 16.0));
+        let down = egui::Rect::from_center_size(egui::pos2(rail.center().x, full.bottom() - 48.0), egui::vec2(36.0, 16.0));
+        if rail_chevron(ui, up, true) {
+            self.rail_nudge += 68.0;
+        }
+        if rail_chevron(ui, down, false) {
+            self.rail_nudge -= 68.0;
+        }
+        let typing = ui.memory(|m| m.focused().is_some());
+        if !typing {
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                self.rail_nudge += 68.0;
             }
-        });
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                self.rail_nudge -= 68.0;
+            }
+        }
+        let list = egui::Rect::from_min_max(egui::pos2(rail.left() + 4.0, 70.0), egui::pos2(rail.right() - 4.0, full.bottom() - 58.0));
+        ui.painter().vline(list.center().x, list.top()..=list.bottom(), egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 32, 36)));
+        let versions = self.rail_versions();
+        let pending: Vec<String> = versions.iter().filter(|id| !self.app.is_installed(id)).cloned().collect();
+        let ready: Vec<String> = versions.iter().filter(|id| self.app.is_installed(id)).cloned().collect();
+        let nudge = self.rail_nudge;
+        self.rail_nudge = 0.0;
+        let left = egui::Rect::from_min_max(list.left_top(), egui::pos2(list.center().x - 2.0, list.bottom()));
+        let right = egui::Rect::from_min_max(egui::pos2(list.center().x + 2.0, list.top()), list.right_bottom());
+        let mut pick = None;
+        pick = pick.or(self.paint_version_column(ui, left, &pending, true, nudge, "rail-gray"));
+        pick = pick.or(self.paint_version_column(ui, right, &ready, false, nudge, "rail-live"));
         if let Some(id) = pick {
             self.select_version_art(&id);
         }
@@ -104,14 +106,17 @@ impl super::super::Desktop {
         settings.on_hover_text("Settings");
     }
 
-    /// `[loader] [Instance | Mods] [pin] [pin] [pin]`, 10px from the rail and 6px apart.
-    pub(crate) fn paint_version_bar(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let y = 12.0;
-        let h = 32.0;
-        let mut x = HOME_RAIL + 10.0;
-        let icon = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(h, h));
+    /// Loader only, 10px from the rail. Pinned copies appear beside it, and only after a pin.
+    pub(crate) fn paint_version_bar(&mut self, ui: &mut egui::Ui, _full: egui::Rect) {
+        let icon = self.loader_hit_rect();
+        let open = self.home_menu;
         ui.painter().rect_filled(icon, 6.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 220));
-        ui.painter().rect_stroke(icon, 6.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(36)), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            icon,
+            6.0,
+            egui::Stroke::new(if open { 1.6 } else { 1.0 }, if open { GOLD } else { egui::Color32::from_white_alpha(36) }),
+            egui::StrokeKind::Inside,
+        );
         let loader = self.current_instance().map(|i| i.loader.clone()).unwrap_or_else(|| self.loader.clone());
         if let Some(tex) = self.loader_icon_id(&loader) {
             ui.painter().image(
@@ -121,16 +126,57 @@ impl super::super::Desktop {
                 egui::Color32::WHITE,
             );
         }
-        x += h + 6.0;
+        let hit = ui.interact(icon, egui::Id::new("loader-menu"), Sense::click());
+        if hit.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if hit.clicked() {
+            self.home_menu = !self.home_menu;
+        }
+        hit.on_hover_text("Instance and Mods");
 
+        let pinned: Vec<crate::instances::Instance> = self.instances.iter().filter(|i| i.pinned).take(3).cloned().collect();
+        let mut x = icon.right() + 6.0;
+        let mut pick = None;
+        for inst in &pinned {
+            let slot = egui::Rect::from_min_size(egui::pos2(x, icon.top()), egui::vec2(32.0, 32.0));
+            let on = inst.id == self.instance_id;
+            ui.painter().rect_filled(slot, 6.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 220));
+            ui.painter().rect_stroke(slot, 6.0, egui::Stroke::new(if on { 1.6 } else { 1.0 }, if on { GOLD } else { egui::Color32::from_white_alpha(50) }), egui::StrokeKind::Inside);
+            if let Some(tex) = self.loader_icon_id(&inst.loader) {
+                ui.painter().image(
+                    tex.id(),
+                    slot.shrink(7.0),
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            let chip = ui.interact(slot, egui::Id::new("pin-slot").with(&inst.id), Sense::click());
+            if chip.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if chip.clicked() {
+                pick = Some(inst.id.clone());
+            }
+            chip.on_hover_text(&inst.name);
+            x += 32.0 + 6.0;
+        }
+        if let Some(id) = pick {
+            self.select_instance(&id);
+        }
+    }
+
+    pub(crate) fn paint_home_switch(&mut self, ui: &mut egui::Ui, _full: egui::Rect) {
+        let y = 52.0;
+        let h = 32.0;
         let labels = ["Instance", "Mods"];
         let mut widths = Vec::new();
         for label in labels {
             widths.push(ui.painter().layout_no_wrap(label.to_string(), nav_font(12.0), HY_TEXT).size().x + 22.0);
         }
         let bar_w: f32 = widths.iter().sum();
-        let bar = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(bar_w, h));
-        ui.painter().rect_filled(bar, 8.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 220));
+        let bar = egui::Rect::from_min_size(egui::pos2(HOME_RAIL + 10.0, y), egui::vec2(bar_w, h));
+        ui.painter().rect_filled(bar, 8.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 235));
         ui.painter().rect_stroke(bar, 8.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(36)), egui::StrokeKind::Inside);
         let mut sx = bar.left();
         for (i, (label, w)) in labels.into_iter().zip(widths).enumerate() {
@@ -156,49 +202,11 @@ impl super::super::Desktop {
             }
             sx += w;
         }
-        x += bar_w + 6.0;
-
-        let pinned: Vec<crate::instances::Instance> = self.instances.iter().filter(|i| i.pinned).take(3).cloned().collect();
-        let mut pick = None;
-        for i in 0..3 {
-            let slot = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(h, h));
-            ui.painter().rect_filled(slot, 6.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 180));
-            if let Some(inst) = pinned.get(i) {
-                let on = inst.id == self.instance_id;
-                ui.painter().rect_stroke(slot, 6.0, egui::Stroke::new(if on { 1.6 } else { 1.0 }, if on { GOLD } else { egui::Color32::from_white_alpha(50) }), egui::StrokeKind::Inside);
-                if let Some(tex) = self.loader_icon_id(&inst.loader) {
-                    ui.painter().image(
-                        tex.id(),
-                        slot.shrink(7.0),
-                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
-                let hit = ui.interact(slot, egui::Id::new("pin-slot").with(&inst.id), Sense::click());
-                if hit.hovered() {
-                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                }
-                if hit.clicked() {
-                    pick = Some(inst.id.clone());
-                }
-                hit.on_hover_text(&inst.name);
-            } else {
-                ui.painter().rect_stroke(slot, 6.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(28)), egui::StrokeKind::Inside);
-            }
-            x += h + 6.0;
-        }
-        if let Some(id) = pick {
-            self.select_instance(&id);
-        }
-        let _ = full;
     }
 
     pub(crate) fn paint_version_instances(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
-        let panel = egui::Rect::from_min_max(
-            egui::pos2(HOME_RAIL + 10.0, 56.0),
-            egui::pos2((HOME_RAIL + 460.0).min(full.right() - 180.0), full.bottom() - 86.0),
-        );
+        let panel = self.home_popup_rect(full);
         ui.painter().rect_filled(panel, 12.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 196));
         ui.painter().rect_stroke(panel, 12.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(32)), egui::StrokeKind::Inside);
         ui.painter().text(
@@ -223,7 +231,7 @@ impl super::super::Desktop {
         } else {
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
             child.set_clip_rect(list);
-            egui::ScrollArea::vertical().id_salt("ver-copies").auto_shrink([false, false]).show(&mut child, |ui| {
+            quiet_scroll("ver-copies").show(&mut child, |ui| {
                 ui.set_width(list.width());
                 for inst in &rows {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(list.width(), 44.0), Sense::hover());
@@ -300,6 +308,60 @@ impl super::super::Desktop {
         self.instances.push(inst.clone());
         crate::instances::save(&self.app, &self.instances);
         self.select_instance(&inst.id);
+        self.notice = "Instance created".into();
+    }
+
+    fn paint_version_column(&mut self, ui: &mut egui::Ui, rect: egui::Rect, ids: &[String], gray: bool, nudge: f32, salt: &str) -> Option<String> {
+        let mut pick = None;
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        child.set_clip_rect(rect);
+        quiet_scroll(salt).show(&mut child, |ui| {
+            ui.set_width(rect.width());
+            if nudge != 0.0 {
+                ui.scroll_with_delta(egui::vec2(0.0, nudge));
+            }
+            for id in ids {
+                let (slot, _) = ui.allocate_exact_size(egui::vec2(rect.width(), 64.0), Sense::hover());
+                let square = egui::Rect::from_center_size(egui::pos2(slot.center().x, slot.top() + 22.0), egui::vec2(40.0, 40.0));
+                let on = self.selected == *id || (self.selected.is_empty() && id == "26.3");
+                let paper = self.paper_for(id);
+                let tint = if gray { egui::Color32::from_rgb(128, 128, 132) } else { egui::Color32::WHITE };
+                if let Some(tex) = self.papers.get(paper.title) {
+                    let uv = cover_uv(tex.size_vec2(), square);
+                    ui.painter().image(tex.id(), square, uv, tint);
+                } else {
+                    ui.painter().rect_filled(square, 4.0, egui::Color32::from_rgb(28, 28, 32));
+                }
+                if gray {
+                    ui.painter().rect_filled(square, 4.0, egui::Color32::from_rgba_unmultiplied(8, 8, 10, 110));
+                }
+                let edge = if on && !gray {
+                    GOLD
+                } else if on {
+                    egui::Color32::from_rgb(150, 132, 84)
+                } else {
+                    egui::Color32::from_white_alpha(if gray { 28 } else { 48 })
+                };
+                ui.painter().rect_stroke(square, 4.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
+                let label = ellipsize(ui.painter(), id, sub_font(9.0), rect.width() - 4.0);
+                ui.painter().text(
+                    egui::pos2(slot.center().x, slot.bottom() - 8.0),
+                    egui::Align2::CENTER_CENTER,
+                    &label,
+                    sub_font(9.0),
+                    if gray { HY_MUTED } else if on { egui::Color32::WHITE } else { HY_TEXT },
+                );
+                let hit = ui.interact(slot, egui::Id::new(salt).with(id), Sense::click());
+                if hit.hovered() {
+                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                }
+                if hit.clicked() {
+                    pick = Some(id.clone());
+                }
+                hit.on_hover_text(if gray { format!("{id} · not installed") } else { id.clone() });
+            }
+        });
+        pick
     }
 
     fn toggle_pin(&mut self, id: &str) {
@@ -322,14 +384,17 @@ impl super::super::Desktop {
 
         let play_h = 50.0;
         let play_w = 156.0;
-        let play = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 18.0 - play_w, full.bottom() - 28.0 - play_h),
-            egui::vec2(play_w, play_h),
-        );
+        let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+        let installed = self.app.is_installed(&version);
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
         let installing = self.job_state().as_deref() == Some("running");
-        let stop = live || installing;
-        let label = if stop { "STOP" } else { "PLAY" };
+        let bar_h = if installing { 16.0 } else { 0.0 };
+        let bar_gap = if installing { 8.0 } else { 0.0 };
+        let play = egui::Rect::from_min_size(
+            egui::pos2(full.right() - 18.0 - play_w, full.bottom() - 28.0 - bar_h - bar_gap - play_h),
+            egui::vec2(play_w, play_h),
+        );
+        let label = if live { "STOP" } else { "PLAY" };
         let note = if installing {
             self.job_message().filter(|s| !s.is_empty()).unwrap_or_else(|| "Downloading…".into())
         } else if let Some((_, line)) = self.job_line() {
@@ -351,20 +416,39 @@ impl super::super::Desktop {
         ui.painter().text(egui::pos2(play.right() - 2.0, note_y), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
         if installing {
             let progress = self.job_line().map(|(p, _)| p).unwrap_or(0.0);
-            let track = egui::Rect::from_min_size(egui::pos2(play.right() - 220.0, play.top() - 22.0), egui::vec2(220.0, 10.0));
+            let track = egui::Rect::from_min_size(egui::pos2(play.right() - 280.0, play.bottom() + bar_gap), egui::vec2(280.0, bar_h));
             paint_download_bar(ui.painter(), track, progress);
         }
         let horizon_here = self.selected.starts_with("26.3");
-        if horizon_here && self.paint_horizon_option(ui, play, horizon_on) {
+        let horizon_anchor = if installing {
+            egui::Rect::from_min_max(play.min, egui::pos2(play.right(), play.bottom() + bar_gap + bar_h - 2.0))
+        } else {
+            play
+        };
+        if horizon_here && self.paint_horizon_option(ui, horizon_anchor, horizon_on) {
             self.engine = if horizon_on { "vanilla".into() } else { "horizon".into() };
             self.save_settings();
         }
-        if play_button(ui, play, label, stop, horizon_on && !stop) {
+        if !installed || installing {
+            let act = egui::Rect::from_min_size(egui::pos2(play.left() - 8.0 - 148.0, play.top()), egui::vec2(148.0, play_h));
+            let act_label = if installing { "STOP" } else { "INSTALL" };
+            if play_button(ui, "install", act, act_label, installing, false) {
+                if installing {
+                    self.cancel_install();
+                } else {
+                    self.play_after = false;
+                    self.start_install();
+                }
+            }
+        }
+        if play_button(ui, "play", play, label, live, horizon_on && !live) {
             self.join = None;
             if live {
                 self.play();
             } else if installing {
-                self.cancel_install();
+                self.notice = "Download in progress".into();
+            } else if !installed && self.engine != "horizon" {
+                self.notice = "Install this version first".into();
             } else {
                 self.play();
             }
@@ -640,4 +724,26 @@ impl super::super::Desktop {
         });
     }
 
+}
+
+fn quiet_scroll(id: impl std::hash::Hash) -> egui::ScrollArea {
+    egui::ScrollArea::vertical()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .drag_to_scroll(true)
+        .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysHidden)
+}
+
+fn rail_chevron(ui: &mut egui::Ui, rect: egui::Rect, up: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new(if up { "rail-up" } else { "rail-down" }), Sense::click());
+    let ink = if hit.hovered() { GOLD } else { egui::Color32::from_rgb(180, 184, 190) };
+    let center = rect.center();
+    let y = if up { center.y + 3.0 } else { center.y - 3.0 };
+    let tip = if up { center.y - 4.0 } else { center.y + 4.0 };
+    ui.painter().line_segment([egui::pos2(center.x - 6.0, y), egui::pos2(center.x, tip)], egui::Stroke::new(1.6, ink));
+    ui.painter().line_segment([egui::pos2(center.x + 6.0, y), egui::pos2(center.x, tip)], egui::Stroke::new(1.6, ink));
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
 }
