@@ -3244,43 +3244,38 @@ fn paint_open_frame(painter: &egui::Painter, rect: egui::Rect) {
     paint_corner_caps(painter, rect, edge);
 }
 
-/// Version-page element: the previous corner caps, a smaller cap inside each
-/// corner, and a short designed mark on each side. No full stroke.
+/// Version-page element: stroke the length and the width, keep the corner cap,
+/// and keep the smaller cap inside each corner.
 fn paint_version_corners(painter: &egui::Painter, rect: egui::Rect, on: bool) {
     let color = if on { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
-    let stroke = egui::Stroke::new(1.15, color);
+    let side = egui::Stroke::new(1.15, color);
+    let corner = egui::Stroke::new(1.35, color);
+    let left = rect.left() + 1.0;
+    let right = rect.right() - 1.0;
+    let top = rect.top() + 1.0;
+    let bottom = rect.bottom() - 1.0;
+    painter.line_segment([egui::pos2(left, top), egui::pos2(right, top)], side);
+    painter.line_segment([egui::pos2(left, bottom), egui::pos2(right, bottom)], side);
+    painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], side);
+    painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], side);
     let small = rect.height().min(rect.width()) < 30.0;
     let leg = if small { 5.0 } else { 6.0 };
     let inner = if small { 3.0 } else { 4.0 };
     let gap = 3.0;
-    let side = 5.0;
     let corners = [
-        (rect.left() + 1.0, rect.top() + 1.0, 1.0, 1.0, rect.width(), rect.height()),
-        (rect.right() - 1.0, rect.top() + 1.0, -1.0, 1.0, rect.width(), rect.height()),
-        (rect.left() + 1.0, rect.bottom() - 1.0, 1.0, -1.0, rect.width(), rect.height()),
-        (rect.right() - 1.0, rect.bottom() - 1.0, -1.0, -1.0, rect.width(), rect.height()),
+        (left, top, 1.0, 1.0),
+        (right, top, -1.0, 1.0),
+        (left, bottom, 1.0, -1.0),
+        (right, bottom, -1.0, -1.0),
     ];
-    for (x, y, sx, sy, along_x, along_y) in corners {
-        painter.line_segment([egui::pos2(x, y), egui::pos2(x + sx * leg, y)], stroke);
-        painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + sy * leg)], stroke);
+    for (x, y, sx, sy) in corners {
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x + sx * leg, y)], corner);
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + sy * leg)], corner);
         let ix = x + sx * (leg + gap);
         let iy = y + sy * (leg + gap);
-        if ix > rect.left() + 2.0 && ix < rect.right() - 2.0 && iy > rect.top() + 2.0 && iy < rect.bottom() - 2.0 {
-            painter.line_segment([egui::pos2(ix, iy), egui::pos2(ix + sx * inner, iy)], stroke);
-            painter.line_segment([egui::pos2(ix, iy), egui::pos2(ix, iy + sy * inner)], stroke);
-        }
-        let dash = leg + gap + 2.0;
-        if along_x > (dash + side) * 2.0 + 10.0 {
-            painter.line_segment(
-                [egui::pos2(x + sx * dash, y), egui::pos2(x + sx * (dash + side), y)],
-                stroke,
-            );
-        }
-        if along_y > (dash + side) * 2.0 + 10.0 {
-            painter.line_segment(
-                [egui::pos2(x, y + sy * dash), egui::pos2(x, y + sy * (dash + side))],
-                stroke,
-            );
+        if ix > left + 2.0 && ix < right - 2.0 && iy > top + 2.0 && iy < bottom - 2.0 {
+            painter.line_segment([egui::pos2(ix, iy), egui::pos2(ix + sx * inner, iy)], corner);
+            painter.line_segment([egui::pos2(ix, iy), egui::pos2(ix, iy + sy * inner)], corner);
         }
     }
 }
