@@ -28,7 +28,7 @@ const MUTED: egui::Color32 = egui::Color32::from_rgb(0xB4, 0xC2, 0xD4);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3B, 0x82, 0xF6);
 const ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
 const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xCA, 0x54);
-const SPEC_YELLOW: egui::Color32 = egui::Color32::from_rgb(0xF6, 0xC4, 0x45);
+const SPEC_YELLOW: egui::Color32 = GOLD;
 const SPEC_TEXT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xF5, 0xFF);
 const SPEC_MUTED: egui::Color32 = egui::Color32::from_rgb(0xA9, 0xB8, 0xDD);
 const SPEC_GREEN: egui::Color32 = egui::Color32::from_rgb(0x7F, 0xE0, 0x8B);
@@ -817,9 +817,6 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        if self.tab == Tab::Versions || self.tab == Tab::Mods {
-            paint_spec_page(ui.painter(), full);
-        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -890,12 +887,13 @@ impl Desktop {
         }
         let total: f32 = widths.iter().sum();
         let bar = egui::Rect::from_min_size(egui::pos2(left, uy(full, 16.0)), egui::vec2(total, h));
+        paint_hytale_bar(ui.painter(), bar);
         let mut x = bar.left();
         for (i, tab) in tabs.into_iter().enumerate() {
             let rect = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(widths[i], h));
             let hit = ui.interact(rect, egui::Id::new("hynav").with(tab.label()), Sense::click());
             let on = self.tab == tab;
-            let color = if on { SPEC_YELLOW } else { egui::Color32::WHITE };
+            let color = if on { GOLD } else { egui::Color32::WHITE };
             if tab == Tab::Home {
                 paint_nav_house(ui.painter(), rect.center(), h * 0.28, color);
             } else {
@@ -916,16 +914,25 @@ impl Desktop {
             }
             if on {
                 let underline = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + 8.0, rect.bottom() - 3.0),
-                    egui::pos2(rect.right() - 8.0, rect.bottom()),
+                    egui::pos2(rect.left() + 10.0, rect.bottom() - 3.0),
+                    egui::pos2(rect.right() - 10.0, rect.bottom() - 1.0),
                 );
-                ui.painter().rect_filled(underline, 1.0, SPEC_YELLOW);
+                ui.painter().rect_filled(underline, 0.0, GOLD);
             }
             if hit.clicked() {
                 self.tab = tab;
             }
             hit.on_hover_text(tab.label());
             x += widths[i];
+        }
+        let sep_h = us(full, 52.0) * 0.44;
+        let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("tab-seps")));
+        let mut sx = bar.left();
+        for (i, width) in widths.iter().enumerate() {
+            if i > 0 {
+                paint_tab_sep(&fg, sx, bar.center().y - sep_h * 0.5, sep_h);
+            }
+            sx += width;
         }
         bar
     }
@@ -1031,8 +1038,7 @@ impl Desktop {
             egui::pos2(ux(full, 22.0), uy(full, 16.0)),
             egui::vec2(pad + head_s + 8.0 + text_w + 12.0, h),
         );
-        ui.painter().rect_filled(bar, 5.0, SPEC_PANEL);
-        ui.painter().rect_stroke(bar, 5.0, egui::Stroke::new(1.0, SPEC_EDGE), egui::StrokeKind::Inside);
+        paint_hytale_bar(ui.painter(), bar);
         let head = egui::Rect::from_center_size(
             egui::pos2(bar.left() + pad + head_s * 0.5, bar.center().y),
             egui::vec2(head_s, head_s),
@@ -1418,6 +1424,7 @@ impl Desktop {
 
     fn paint_version_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let content = spec_content(full);
+        paint_blend_stage(ui.painter(), content);
         let left = egui::Rect::from_min_size(content.min, egui::vec2(360.0, content.height() - 72.0));
         let right = egui::Rect::from_min_max(
             egui::pos2(left.right() + 12.0, content.top()),
@@ -1448,7 +1455,7 @@ impl Desktop {
 
     fn paint_instance_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
         let head = egui::Rect::from_min_size(col.min, egui::vec2(col.width(), 36.0));
-        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), SPEC_MUTED);
+        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), GOLD);
         let count = format!("{}", self.instances.len());
         ui.painter().text(egui::pos2(head.left() + 92.0, head.center().y), egui::Align2::LEFT_CENTER, &count, sub_font(13.0), SPEC_TEXT);
         let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 84.0, head.top() + 2.0), egui::vec2(84.0, 32.0));
@@ -1499,7 +1506,7 @@ impl Desktop {
 
     fn paint_loader_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
         let head = egui::Rect::from_min_size(col.min, egui::vec2(col.width(), 36.0));
-        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), SPEC_MUTED);
+        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), GOLD);
         let for_mc = format!("for Minecraft {}", if self.selected.is_empty() { "26.3" } else { self.selected.as_str() });
         ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &for_mc, sub_font(13.0), SPEC_YELLOW);
         let list = egui::Rect::from_min_max(egui::pos2(col.left(), head.bottom() + 8.0), col.right_bottom());
@@ -1520,7 +1527,8 @@ impl Desktop {
             let missing = matches!(row.kind, crate::loaders::Badge::Preview) && row.version.is_empty();
             let on = self.loader_active(row.id);
             if missing {
-                paint_dashed_rect(ui.painter(), rect, SPEC_MUTED);
+                ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(20, 34, 62, 150));
+                paint_dashed_rect(ui.painter(), rect, egui::Color32::from_rgb(176, 196, 214));
             } else {
                 spec_card(ui.painter(), rect, on);
             }
@@ -1576,6 +1584,7 @@ impl Desktop {
 
     fn paint_mods_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let content = spec_content(full);
+        paint_blend_stage(ui.painter(), content);
         let right = egui::Rect::from_min_max(egui::pos2(content.right() - 290.0, content.top()), content.right_bottom());
         let left = egui::Rect::from_min_max(content.left_top(), egui::pos2(right.left() - 12.0, content.bottom()));
         spec_panel(ui.painter(), left);
@@ -4059,29 +4068,26 @@ fn spec_content(full: egui::Rect) -> egui::Rect {
     egui::Rect::from_min_max(egui::pos2(16.0, 64.0), egui::pos2(full.right() - 16.0, full.bottom() - 12.0))
 }
 
-fn paint_spec_page(painter: &egui::Painter, rect: egui::Rect) {
-    paint_vgradient(
-        painter,
-        rect,
-        0.0,
-        egui::Color32::from_rgb(0x1A, 0x2A, 0x5C),
-        egui::Color32::from_rgb(0x12, 0x1C, 0x3F),
-    );
+fn paint_blend_stage(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(18, 32, 58, 118));
+    paint_open_frame(painter, rect);
 }
 
 fn spec_panel(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 6.0, SPEC_PANEL);
-    painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0, SPEC_EDGE), egui::StrokeKind::Inside);
+    painter.rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(28, 48, 88, 196));
+    paint_open_frame(painter, rect);
 }
 
 fn spec_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
-    painter.rect_filled(rect, 5.0, if selected { SPEC_SEL } else { SPEC_ITEM });
-    painter.rect_stroke(
-        rect,
-        5.0,
-        egui::Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { SPEC_YELLOW } else { SPEC_EDGE }),
-        egui::StrokeKind::Inside,
-    );
+    let fill = if selected {
+        egui::Color32::from_rgba_unmultiplied(48, 78, 138, 236)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(36, 62, 112, 226)
+    };
+    let edge = if selected { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    painter.rect_filled(rect, 1.5, fill);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
+    paint_corner_caps(painter, rect, edge);
 }
 
 fn paint_check(painter: &egui::Painter, rect: egui::Rect, on: bool) {
@@ -4134,16 +4140,20 @@ fn classify_drop(path: &std::path::Path) -> u8 {
 
 fn spec_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("spec-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
-    let fill = if primary { SPEC_YELLOW } else if hit.hovered() { SPEC_SEL } else { SPEC_ITEM };
-    let edge = if primary { SPEC_YELLOW } else { SPEC_EDGE };
-    ui.painter().rect_filled(rect, 5.0, fill);
-    ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    if primary {
+        paint_hytale_bar(ui.painter(), rect);
+    } else if hit.hovered() {
+        ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(48, 78, 138, 236));
+        paint_open_frame(ui.painter(), rect);
+    } else {
+        paint_element_template(ui.painter(), rect);
+    }
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
         nav_font(13.0),
-        if primary { egui::Color32::from_rgb(0x1A, 0x14, 0x04) } else { SPEC_TEXT },
+        if primary { GOLD } else { egui::Color32::from_rgb(255, 246, 226) },
     );
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
