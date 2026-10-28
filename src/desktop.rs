@@ -1597,8 +1597,8 @@ impl Desktop {
             } else {
                 paint_opaque_card(ui.painter(), rect, on);
             }
-            let switch = egui::Rect::from_min_size(egui::pos2(rect.right() - 32.0, rect.center().y - 11.0), egui::vec2(22.0, 22.0));
-            let warn = egui::Rect::from_min_size(egui::pos2(switch.left() - 4.0 - 18.0, rect.center().y - 9.0), egui::vec2(18.0, 18.0));
+            let switch = egui::Rect::from_min_size(egui::pos2(rect.right() - 48.0, rect.center().y - 8.0), egui::vec2(40.0, 16.0));
+            let warn = egui::Rect::from_min_size(egui::pos2(switch.left() - 4.0 - 16.0, rect.center().y - 8.0), egui::vec2(16.0, 16.0));
             if missing {
                 paint_warn(ui.painter(), warn.center());
             }
@@ -4223,8 +4223,8 @@ fn paint_slide_switch(ui: &mut egui::Ui, rect: egui::Rect, on: bool, id: egui::I
     };
     ui.painter().rect_filled(rect, 1.5, track);
     ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, if on { GOLD } else { egui::Color32::from_rgb(176, 180, 188) }), egui::StrokeKind::Inside);
-    let knob = 8.0;
-    let x = rect.left() + 3.0 + t * (rect.width() - knob - 6.0);
+    let knob = (rect.height() - 4.0).max(8.0);
+    let x = rect.left() + 2.0 + t * (rect.width() - knob - 4.0);
     let knob_rect = egui::Rect::from_min_size(egui::pos2(x, rect.center().y - knob * 0.5), egui::vec2(knob, knob));
     ui.painter().rect_filled(knob_rect, 1.0, egui::Color32::from_rgb(255, 248, 232));
     if !enabled {
