@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/mark.png" width="128" height="128" alt="Rus mark: a crystal R">
+  <img src="assets/rus-icon.png" width="128" height="128" alt="Rus project logo">
 </p>
 
 <h1 align="center">Rus</h1>
@@ -124,8 +124,8 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/0.2.32/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/0.2.32/rus-windows-x64.exe) |
+| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/0.2.33/rus-linux-x86_64) |
+| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/0.2.33/rus-windows-x64.exe) |
 
 Linux:
 

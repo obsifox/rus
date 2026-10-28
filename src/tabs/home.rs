@@ -66,10 +66,13 @@ impl super::super::Desktop {
 
     pub(crate) fn paint_title_logo(&self, ui: &mut egui::Ui, full: egui::Rect) {
         let Some(tex) = &self.logo_title else { return };
-        let side = 112.0;
+        let size = tex.size();
+        let aspect = if size[1] == 0 { 1080.0 / 481.0 } else { size[0] as f32 / size[1] as f32 };
+        let h = 104.0;
+        let w = h * aspect;
         let rect = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 30.0 - side, full.top() + 40.0),
-            egui::vec2(side, side),
+            egui::pos2(full.right() - 30.0 - w, full.top() + 40.0),
+            egui::vec2(w, h),
         );
         ui.painter().image(
             tex.id(),
