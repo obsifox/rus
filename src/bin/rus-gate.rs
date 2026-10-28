@@ -200,6 +200,8 @@ impl eframe::App for Gate {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frames += 1;
         self.pump(ctx);
+        #[cfg(windows)]
+        fit_windows_frame();
         if let Some(size) = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size())) {
             if (size.x - WINDOW_W).abs() > 1.0 || (size.y - WINDOW_H).abs() > 1.0 {
                 ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WINDOW_W, WINDOW_H)));
@@ -511,10 +513,10 @@ fn replace_and_relaunch(dir: &Path, staged: &Path) -> Result<(), String> {
             launcher.display(),
         );
         std::fs::write(&script, body).map_err(|e| e.to_string())?;
-        Command::new("cmd")
-            .args(["/C", &script.display().to_string()])
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", &script.display().to_string()]);
+        hide_console(&mut cmd);
+        cmd.spawn().map_err(|e| e.to_string())?;
         std::process::exit(0);
     }
     #[cfg(not(windows))]
@@ -871,16 +873,19 @@ fn desktop_shortcut(target: &Path, workdir: &Path) -> Result<(), String> {
             .map(|p| PathBuf::from(p).join("Desktop"))
             .unwrap_or_else(|_| PathBuf::from("."));
         let link = desktop.join("Rus Launcher.lnk");
+        let vbs = workdir.join("rus-shortcut.vbs");
         let script = format!(
-            "$w = New-Object -ComObject WScript.Shell; $s = $w.CreateShortcut('{}'); $s.TargetPath = '{}'; $s.WorkingDirectory = '{}'; $s.Description = 'Rus Launcher'; $s.Save()",
-            link.display().to_string().replace('\'', "''"),
-            target.display().to_string().replace('\'', "''"),
-            workdir.display().to_string().replace('\'', "''"),
+            "Set w = CreateObject(\"WScript.Shell\")\r\nSet s = w.CreateShortcut(\"{}\")\r\ns.TargetPath = \"{}\"\r\ns.WorkingDirectory = \"{}\"\r\ns.Description = \"Rus Launcher\"\r\ns.Save\r\n",
+            link.display().to_string().replace('"', "\"\""),
+            target.display().to_string().replace('"', "\"\""),
+            workdir.display().to_string().replace('"', "\"\""),
         );
-        let out = Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
-            .output()
-            .map_err(|e| e.to_string())?;
+        std::fs::write(&vbs, script).map_err(|e| e.to_string())?;
+        let mut cmd = Command::new("wscript");
+        cmd.args(["//nologo", &vbs.display().to_string()]);
+        hide_console(&mut cmd);
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&vbs);
         if out.status.success() {
             Ok(())
         } else {
@@ -893,7 +898,10 @@ fn pick_folder() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         let script = "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Install Rus'; $f.ShowNewFolderButton = $true; if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath }";
-        let out = Command::new("powershell").args(["-NoProfile", "-Command", script]).output().ok()?;
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-Command", script]);
+        hide_console(&mut cmd);
+        let out = cmd.output().ok()?;
         let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if path.is_empty() { None } else { Some(PathBuf::from(path)) }
     }
@@ -912,6 +920,85 @@ fn pick_folder() -> Option<PathBuf> {
         } else {
             None
         }
+    }
+}
+
+fn hide_console(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
+}
+
+/// Drop the caption winit leaves on a borderless window, so the picture is not
+/// drawn under a black bar.
+#[cfg(windows)]
+fn fit_windows_frame() {
+    use std::os::raw::c_void;
+    const GWL_STYLE: i32 = -16;
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_CAPTION: isize = 0x00C0_0000;
+    const WS_THICKFRAME: isize = 0x0004_0000;
+    const WS_BORDER: isize = 0x0080_0000;
+    const WS_EX_WINDOWEDGE: isize = 0x0000_0100;
+    const WS_EX_CLIENTEDGE: isize = 0x0000_0200;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+    #[repr(C)]
+    struct Margins {
+        cx_left: i32,
+        cx_right: i32,
+        cy_top: i32,
+        cy_bottom: i32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn FindWindowW(class: *const u16, window: *const u16) -> *mut c_void;
+        fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, value: isize) -> isize;
+        fn SetWindowPos(hwnd: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    }
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmExtendFrameIntoClientArea(hwnd: *mut c_void, margins: *const Margins) -> i32;
+    }
+    let name: Vec<u16> = "Rus Gate\0".encode_utf16().collect();
+    let hwnd = unsafe { FindWindowW(std::ptr::null(), name.as_ptr()) };
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let next = style & !(WS_CAPTION | WS_THICKFRAME | WS_BORDER);
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let next_ex = ex & !(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+        if next != style {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, next);
+        }
+        if next_ex != ex {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next_ex);
+        }
+        if next != style || next_ex != ex {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+        let margins = Margins { cx_left: -1, cx_right: -1, cy_top: -1, cy_bottom: -1 };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 }
 

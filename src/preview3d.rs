@@ -11,7 +11,6 @@ pub struct SkinPreview {
     pub zoom: f32,
     pub auto_rotate: bool,
     pub show_cape: bool,
-    pub show_overlay: bool,
     pub walk: bool,
     pub arms: ArmModel,
     walk_phase: f32,
@@ -28,7 +27,6 @@ impl Default for SkinPreview {
             zoom: 1.0,
             auto_rotate: false,
             show_cape: true,
-            show_overlay: true,
             walk: false,
             arms: ArmModel::Auto,
             walk_phase: 0.0,
@@ -128,7 +126,7 @@ impl SkinPreview {
                         walk: if self.walk { self.walk_phase } else { 0.0 },
                         slim,
                         cape: self.show_cape,
-                        overlay: self.show_overlay,
+                        overlay: false,
                         width: (size.x * ppp) as u32,
                         height: (size.y * ppp) as u32,
                     },
@@ -158,7 +156,6 @@ impl SkinPreview {
             });
             ui.add_space(2.0);
             toggle(ui, &mut self.show_cape, "Cape", &mut self.dirty);
-            toggle(ui, &mut self.show_overlay, "Overlay layers", &mut self.dirty);
             toggle(ui, &mut self.auto_rotate, "Auto-rotate", &mut self.dirty);
             toggle(ui, &mut self.walk, "Walk", &mut self.dirty);
             ui.add_space(4.0);

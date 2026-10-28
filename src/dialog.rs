@@ -9,10 +9,10 @@ pub fn pick_file(title: &str, pattern: &str) -> Option<PathBuf> {
         let script = format!(
             "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = '{title}'; $f.Filter = '{pattern}|{pattern}'; if ($f.ShowDialog() -eq 'OK') {{ $f.FileName }}"
         );
-        let out = Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
-            .output()
-            .ok()?;
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-Command", &script]);
+        hide_console(&mut cmd);
+        let out = cmd.output().ok()?;
         let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if path.is_empty() { None } else { Some(PathBuf::from(path)) }
     }
@@ -41,6 +41,18 @@ pub fn pick_file(title: &str, pattern: &str) -> Option<PathBuf> {
         } else {
             None
         }
+    }
+}
+
+fn hide_console(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
     }
 }
 
