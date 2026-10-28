@@ -132,7 +132,7 @@ pub fn build_command_at(app: &App, id: &str, game_dir: &std::path::Path, server:
     add(&mut vars, "user_properties", "{}");
     add(&mut vars, "version_type", "release");
     add(&mut vars, "launcher_name", "launcher");
-    add(&mut vars, "launcher_version", env!("CARGO_PKG_VERSION"));
+    add(&mut vars, "launcher_version", crate::product::VERSION);
     add(&mut vars, "classpath", &classpath_str);
     add(&mut vars, "natives_directory", &natives_dir.to_string_lossy());
     add(&mut vars, "resolution_width", &settings.width.to_string());

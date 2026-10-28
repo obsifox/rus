@@ -1,9 +1,9 @@
 [package]
 name = "launcher"
-version = "0.2.33"
+version = "1.26.3"
 edition = "2021"
 autobins = false
-description = "Rus — a Minecraft: Java Edition launcher written in Rust"
+description = "Rus — a Minecraft: Java Edition launcher, installed by Rus Gate"
 
 [dependencies]
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
@@ -29,3 +29,7 @@ panic = "abort"
 [[bin]]
 name = "rus"
 path = "src/main.rs"
+
+[[bin]]
+name = "rus-gate"
+path = "src/bin/rus-gate.rs"

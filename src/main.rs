@@ -4,6 +4,8 @@
 //! serve a web page. Release builds do not open a console.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[path = "product.rs"]
+mod product;
 mod desktop;
 mod dialog;
 mod horizon;
@@ -28,7 +30,7 @@ fn main() {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
             "Rus {}\n\n  --dir <path>     data directory (default ~/.rus, or %APPDATA%\\Rus on Windows)\n  --shot <file>    save a picture of the window, then exit\n  --tab <name>     home, versions, mods, or settings\n\nRus is a native window. It does not open a browser.\n",
-            env!("CARGO_PKG_VERSION")
+            crate::product::VERSION
         );
         return;
     }

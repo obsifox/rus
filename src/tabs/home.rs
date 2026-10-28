@@ -39,7 +39,7 @@ impl super::super::Desktop {
         } else if self.notice != "Ready" && !self.notice.is_empty() {
             self.notice.clone()
         } else {
-            format!("Patch {}", env!("CARGO_PKG_VERSION"))
+            format!("Patch {}", crate::product::VERSION)
         };
         let note_font = lexend(us(full, 14.0));
         let note_w = ui.painter().layout_no_wrap(note.clone(), note_font.clone(), GOLD).size().x;

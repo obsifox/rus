@@ -122,19 +122,23 @@ Linux sandbox: `apt install bubblewrap`. Without it, the client still gets a pri
 
 ## Downloads
 
+The release is Rus Gate. Download it once.
+
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | [rus-linux-x86_64](https://github.com/obsifox/rus/releases/download/0.2.33/rus-linux-x86_64) |
-| Windows x64 | [rus-windows-x64.exe](https://github.com/obsifox/rus/releases/download/0.2.33/rus-windows-x64.exe) |
+| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.00/rus-gate.exe) |
 
-Linux:
+<p align="center">
+  <img src="docs/gate.png" alt="Rus Gate, a solid-color install window" width="640">
+</p>
 
-```bash
-chmod +x rus-linux-x86_64
-./rus-linux-x86_64
-```
+Run `rus-gate.exe`. The window is one solid color, with no title bar. It asks where to install, then does not ask again. The folder is saved in the registry (`HKCU\Software\Rus`). The folder receives `rus-gate.exe` and `Rus Launcher.exe`.
 
-Windows: run `rus-windows-x64.exe`. It opens the Rus window. It does not open a browser.
+`Rus Launcher.exe` does not show the install step. With a connection it reads **tags**, not the release list, downloads `rus_{version}.exe` from that tag's release, and starts it. With no connection it starts the installed build.
+
+Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits.
+
+Linux builds from source with `cargo build --release`. The published release is the Windows gate.
 
 ## License
 
