@@ -28,13 +28,14 @@ const MUTED: egui::Color32 = egui::Color32::from_rgb(0xB4, 0xC2, 0xD4);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x3B, 0x82, 0xF6);
 const ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
 const GOLD: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xCA, 0x54);
-const HY_SKY: egui::Color32 = egui::Color32::from_rgb(0x4E, 0x86, 0xB8);
-const HY_ICE: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xF4, 0xFC);
-const HY_LIT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xF8, 0xEA);
-const HY_EDGE: egui::Color32 = egui::Color32::from_rgb(0xA0, 0xC4, 0xE8);
-const HY_GOLD: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xD6, 0x79);
-const HY_INK: egui::Color32 = egui::Color32::from_rgb(0x15, 0x24, 0x3A);
-const HY_MUTED: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x66, 0x8B);
+const HY_BG: egui::Color32 = egui::Color32::from_rgb(0x15, 0x24, 0x3A);
+const HY_SURFACE: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x2F, 0x4B);
+const HY_HIGH: egui::Color32 = egui::Color32::from_rgb(0x24, 0x3B, 0x5E);
+const HY_BORDER: egui::Color32 = egui::Color32::from_rgb(0x32, 0x50, 0x7A);
+const HY_TEXT: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xEE, 0xF7);
+const HY_MUTED: egui::Color32 = egui::Color32::from_rgb(0x9F, 0xB0, 0xC8);
+const HY_ACCENT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xB8, 0x4B);
+const HY_LINK: egui::Color32 = egui::Color32::from_rgb(0x5F, 0xA8, 0xFF);
 const SPEC_YELLOW: egui::Color32 = GOLD;
 const SPEC_TEXT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xF5, 0xFF);
 const SPEC_MUTED: egui::Color32 = egui::Color32::from_rgb(0xA9, 0xB8, 0xDD);
@@ -867,7 +868,7 @@ impl Desktop {
         self.paint_wallpaper(ui, full);
         if self.tab == Tab::Versions {
             // One color under every layer, 40% transparent, on the wallpaper.
-            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(0x7B, 0xA9, 0xD9, 153));
+            ui.painter().rect_filled(full, 0.0, egui::Color32::from_rgba_unmultiplied(0x15, 0x24, 0x3A, 153));
         }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
@@ -1510,9 +1511,9 @@ impl Desktop {
 
     fn paint_instance_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
         let head = egui::Rect::from_min_size(col.min + egui::vec2(10.0, 4.0), egui::vec2(col.width() - 20.0, 32.0));
-        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), egui::Color32::from_rgb(0xEB, 0xF7, 0xFF));
+        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "INSTANCES", nav_font(12.0), HY_ACCENT);
         let count = format!("{}", self.instances.len());
-        ui.painter().text(egui::pos2(head.left() + 92.0, head.center().y), egui::Align2::LEFT_CENTER, &count, sub_font(13.0), egui::Color32::from_rgb(0xD2, 0xE9, 0xF7));
+        ui.painter().text(egui::pos2(head.left() + 92.0, head.center().y), egui::Align2::LEFT_CENTER, &count, sub_font(13.0), HY_MUTED);
         let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 72.0, head.top() + 1.0), egui::vec2(72.0, 28.0));
         if opaque_button(ui, new_btn, "NEW", true) {
             self.draft_name.clear();
@@ -1522,7 +1523,7 @@ impl Desktop {
         let list = egui::Rect::from_min_max(egui::pos2(col.left() + 8.0, head.bottom() + 4.0), egui::pos2(col.right() - 8.0, col.bottom() - 6.0));
         if self.instances.is_empty() {
             let btn = egui::Rect::from_center_size(list.center(), egui::vec2(220.0, 36.0));
-            ui.painter().text(egui::pos2(list.center().x, list.center().y - 28.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), egui::Color32::from_rgb(0xD2, 0xE9, 0xF7));
+            ui.painter().text(egui::pos2(list.center().x, list.center().y - 28.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), HY_MUTED);
             if opaque_button(ui, btn, "Create instance", true) {
                 self.draft_open = true;
             }
@@ -1550,7 +1551,7 @@ impl Desktop {
                 let select = egui::Rect::from_min_size(egui::pos2(rect.right() - 138.0, rect.top() + 14.0), egui::vec2(68.0, 30.0));
                 let delete = egui::Rect::from_min_size(egui::pos2(rect.right() - 64.0, rect.top() + 14.0), egui::vec2(54.0, 30.0));
                 let name = ellipsize(ui.painter(), &inst.name, title_font(16.0), select.left() - icon.right() - 20.0);
-                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 20.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), HY_INK);
+                ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 20.0), egui::Align2::LEFT_CENTER, &name, title_font(16.0), if on { HY_ACCENT } else { HY_TEXT });
                 let sub = format!("{} · {}", inst.version, crate::state::loader_label(&inst.loader));
                 ui.painter().text(egui::pos2(icon.right() + 10.0, rect.top() + 38.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &sub, sub_font(13.0), select.left() - icon.right() - 20.0), sub_font(13.0), HY_MUTED);
                 if opaque_button(ui, select, if on { "Selected" } else { "Select" }, on) {
@@ -1571,16 +1572,16 @@ impl Desktop {
 
     fn paint_loader_column(&mut self, ui: &mut egui::Ui, col: egui::Rect) {
         let head = egui::Rect::from_min_size(col.min + egui::vec2(8.0, 4.0), egui::vec2(col.width() - 16.0, 32.0));
-        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), egui::Color32::from_rgb(0xEB, 0xF7, 0xFF));
+        ui.painter().text(head.left_center(), egui::Align2::LEFT_CENTER, "LOADER", nav_font(12.0), HY_ACCENT);
         let mc = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
-        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &mc, sub_font(12.0), HY_GOLD);
+        ui.painter().text(head.right_center(), egui::Align2::RIGHT_CENTER, &mc, sub_font(12.0), HY_LINK);
         let list = egui::Rect::from_min_max(egui::pos2(col.left() + 3.0, head.bottom() + 2.0), egui::pos2(col.right() - 3.0, col.bottom() - 6.0));
         let rows = crate::loaders::rows_for(&mc, &self.loaders);
         if !self.loaders.ready && rows.iter().all(|r| r.id == "vanilla" || r.version.is_empty()) {
             for i in 0..5 {
                 let y = list.top() + i as f32 * 48.0;
                 let row = egui::Rect::from_min_size(egui::pos2(list.left(), y), egui::vec2(list.width(), 42.0));
-                ui.painter().rect_filled(row, 1.5, HY_ICE);
+                ui.painter().rect_filled(row, 1.5, HY_SURFACE);
             }
             return;
         }
@@ -1597,8 +1598,8 @@ impl Desktop {
             if pair {
                 paint_purple_card(ui.painter(), rect);
             } else if missing {
-                ui.painter().rect_filled(rect, 1.5, egui::Color32::from_rgb(0xD7, 0xE0, 0xE6));
-                ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(0xA8, 0xB6, 0xC2)), egui::StrokeKind::Inside);
+                ui.painter().rect_filled(rect, 1.5, HY_BG);
+                ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
             } else if fade {
                 paint_faded_card(ui.painter(), rect);
             } else {
@@ -1615,14 +1616,16 @@ impl Desktop {
             }
             let text_right = if missing { warn.left() - 8.0 } else { switch.left() - 8.0 };
             let ink = if pair {
-                egui::Color32::from_rgb(0x5A, 0x32, 0x8A)
+                egui::Color32::from_rgb(0xC4, 0xB0, 0xFF)
+            } else if on {
+                HY_ACCENT
             } else if missing || fade {
-                egui::Color32::from_rgb(0x5C, 0x6B, 0x78)
+                HY_MUTED
             } else {
-                HY_INK
+                HY_TEXT
             };
             let detail = if row.version.is_empty() { row.detail.clone() } else { row.version.clone() };
-            let detail_ink = if missing || fade { egui::Color32::from_rgb(0x7A, 0x8A, 0x96) } else if pair { egui::Color32::from_rgb(0x7A, 0x52, 0xA8) } else { HY_MUTED };
+            let detail_ink = if pair { egui::Color32::from_rgb(0xA7, 0x8B, 0xFA) } else { HY_MUTED };
             ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 15.0), egui::Align2::LEFT_CENTER, row.name, title_font(14.0), ink);
             ui.painter().text(egui::pos2(rect.left() + 10.0, rect.top() + 30.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &detail, sub_font(11.0), (text_right - rect.left() - 12.0).max(24.0)), sub_font(11.0), detail_ink);
         }
@@ -1642,8 +1645,8 @@ impl Desktop {
             let parts: Vec<String> = chosen.iter().map(|r| if r.version.is_empty() { r.name.to_string() } else { format!("{} {}", r.name, r.version) }).collect();
             format!("{} on {name} · Minecraft {mc}", parts.join(" + "))
         };
-        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 18.0), egui::Align2::LEFT_CENTER, "WILL INSTALL", nav_font(11.0), egui::Color32::from_rgb(0xEB, 0xF7, 0xFF));
-        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 40.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &plan, body_font(15.0), foot.width() - 210.0), body_font(15.0), egui::Color32::from_rgb(0xD2, 0xE9, 0xF7));
+        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 18.0), egui::Align2::LEFT_CENTER, "WILL INSTALL", nav_font(11.0), HY_ACCENT);
+        ui.painter().text(egui::pos2(foot.left() + 14.0, foot.top() + 40.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &plan, body_font(15.0), foot.width() - 210.0), body_font(15.0), HY_TEXT);
         let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 168.0, foot.top() + 16.0), egui::vec2(152.0, 36.0));
         let active = chosen.iter().find(|r| r.id != "optifine").cloned();
         let raw = self.install_label(active.as_ref());
@@ -1667,8 +1670,8 @@ impl Desktop {
         ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(120));
         let box_rect = egui::Rect::from_center_size(full.center(), egui::vec2(440.0, 168.0));
         paint_main_box(ui.painter(), box_rect);
-        ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.top() + 28.0), egui::Align2::LEFT_CENTER, "Delete this instance?", title_font(16.0), egui::Color32::from_rgb(0xEB, 0xF7, 0xFF));
-        ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.top() + 56.0), egui::Align2::LEFT_CENTER, &format!("{name} · {files} files"), body_font(14.0), egui::Color32::from_rgb(0xD2, 0xE9, 0xF7));
+        ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.top() + 28.0), egui::Align2::LEFT_CENTER, "Delete this instance?", title_font(16.0), HY_TEXT);
+        ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.top() + 56.0), egui::Align2::LEFT_CENTER, &format!("{name} · {files} files"), body_font(14.0), HY_MUTED);
         let cancel = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 220.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 34.0));
         let ok = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 112.0, box_rect.bottom() - 52.0), egui::vec2(96.0, 34.0));
         if opaque_button(ui, cancel, "Cancel", false) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -3901,8 +3904,8 @@ fn icon_label(ui: &mut egui::Ui, icon: char, size: f32, color: egui::Color32) {
 }
 
 fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {
-    let fill = egui::Color32::from_rgb(0x3E, 0x66, 0x8B);
-    let edge = egui::Color32::from_rgb(0xA0, 0xC4, 0xE8);
+    let fill = HY_BG;
+    let edge = HY_BORDER;
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
@@ -4167,14 +4170,14 @@ fn spec_content(full: egui::Rect) -> egui::Rect {
 }
 
 fn paint_main_box(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 1.5, HY_SKY);
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_EDGE), egui::StrokeKind::Inside);
-    paint_corner_caps(painter, rect, HY_EDGE);
+    painter.rect_filled(rect, 1.5, HY_BG);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
+    paint_corner_caps(painter, rect, HY_BORDER);
 }
 
 fn paint_opaque_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
-    let fill = if selected { HY_LIT } else { HY_ICE };
-    let edge = if selected { HY_GOLD } else { HY_EDGE };
+    let fill = if selected { HY_HIGH } else { HY_SURFACE };
+    let edge = if selected { HY_ACCENT } else { HY_BORDER };
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
@@ -4195,11 +4198,11 @@ fn red_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {
 
 fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) -> bool {
     let hit = ui.interact(rect, egui::Id::new("opaque-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
-    let fill = if primary { HY_GOLD } else { HY_ICE };
-    let edge = if primary { HY_GOLD } else { HY_EDGE };
+    let fill = if primary { HY_ACCENT } else { HY_HIGH };
+    let edge = if primary { HY_ACCENT } else { HY_BORDER };
     ui.painter().rect_filled(rect, 1.5, fill);
     ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), HY_INK);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(12.0), if primary { HY_BG } else { HY_TEXT });
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
@@ -4207,13 +4210,13 @@ fn opaque_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool
 }
 
 fn paint_faded_card(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 1.5, egui::Color32::from_rgb(0xC5, 0xD4, 0xE0));
-    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(0x9A, 0xB0, 0xC0)), egui::StrokeKind::Inside);
+    painter.rect_filled(rect, 1.5, egui::Color32::from_rgb(0x12, 0x1C, 0x30));
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, egui::Color32::from_rgb(0x2A, 0x3A, 0x52)), egui::StrokeKind::Inside);
 }
 
 fn paint_purple_card(painter: &egui::Painter, rect: egui::Rect) {
-    let edge = egui::Color32::from_rgb(0xB0, 0x6B, 0xFF);
-    painter.rect_filled(rect, 1.5, egui::Color32::from_rgb(0xF3, 0xE9, 0xFF));
+    let edge = egui::Color32::from_rgb(0xA7, 0x8B, 0xFA);
+    painter.rect_filled(rect, 1.5, HY_SURFACE);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(2.0, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
 }
@@ -4221,18 +4224,18 @@ fn paint_purple_card(painter: &egui::Painter, rect: egui::Rect) {
 fn paint_slide_switch(ui: &mut egui::Ui, rect: egui::Rect, on: bool, id: egui::Id, enabled: bool) -> bool {
     let t = ui.ctx().animate_bool_with_time(id.with("knob"), on, 0.16);
     let track = if !enabled {
-        egui::Color32::from_rgb(0xC5, 0xD0, 0xD8)
+        egui::Color32::from_rgb(0x12, 0x1C, 0x30)
     } else if t > 0.5 {
-        HY_GOLD
+        HY_ACCENT
     } else {
-        egui::Color32::from_rgb(0xD5, 0xE2, 0xEC)
+        HY_SURFACE
     };
     ui.painter().rect_filled(rect, 1.5, track);
-    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, if on { egui::Color32::from_rgb(0xD9, 0xA4, 0x41) } else { HY_EDGE }), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.0, if on { HY_ACCENT } else { HY_BORDER }), egui::StrokeKind::Inside);
     let knob = (rect.height() - 4.0).max(8.0);
     let x = rect.left() + 2.0 + t * (rect.width() - knob - 4.0);
     let knob_rect = egui::Rect::from_min_size(egui::pos2(x, rect.center().y - knob * 0.5), egui::vec2(knob, knob));
-    ui.painter().rect_filled(knob_rect, 1.0, if on { egui::Color32::WHITE } else { HY_INK });
+    ui.painter().rect_filled(knob_rect, 1.0, if on { HY_BG } else { HY_TEXT });
     if !enabled {
         return false;
     }
@@ -4247,8 +4250,8 @@ fn paint_warn(painter: &egui::Painter, center: egui::Pos2) {
     let a = center + egui::vec2(0.0, -7.0);
     let b = center + egui::vec2(-6.5, 6.0);
     let c = center + egui::vec2(6.5, 6.0);
-    painter.add(egui::Shape::convex_polygon(vec![a, c, b], HY_GOLD, egui::Stroke::new(1.4, egui::Color32::from_rgb(0xD9, 0xA4, 0x41))));
-    painter.text(center + egui::vec2(0.0, 1.5), egui::Align2::CENTER_CENTER, "!", nav_font(10.0), HY_INK);
+    painter.add(egui::Shape::convex_polygon(vec![a, c, b], HY_ACCENT, egui::Stroke::new(1.4, HY_ACCENT)));
+    painter.text(center + egui::vec2(0.0, 1.5), egui::Align2::CENTER_CENTER, "!", nav_font(10.0), HY_BG);
 }
 
 fn count_files(path: &std::path::Path) -> usize {
@@ -4271,17 +4274,14 @@ fn paint_blend_stage(painter: &egui::Painter, rect: egui::Rect) {
 }
 
 fn spec_panel(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 1.5, egui::Color32::from_rgba_unmultiplied(28, 48, 88, 196));
-    paint_open_frame(painter, rect);
+    painter.rect_filled(rect, 1.5, HY_BG);
+    painter.rect_stroke(rect, 1.5, egui::Stroke::new(1.0, HY_BORDER), egui::StrokeKind::Inside);
+    paint_corner_caps(painter, rect, HY_BORDER);
 }
 
 fn spec_card(painter: &egui::Painter, rect: egui::Rect, selected: bool) {
-    let fill = if selected {
-        egui::Color32::from_rgba_unmultiplied(48, 78, 138, 236)
-    } else {
-        egui::Color32::from_rgba_unmultiplied(36, 62, 112, 226)
-    };
-    let edge = if selected { GOLD } else { egui::Color32::from_rgb(196, 214, 232) };
+    let fill = if selected { HY_HIGH } else { HY_SURFACE };
+    let edge = if selected { HY_ACCENT } else { HY_BORDER };
     painter.rect_filled(rect, 1.5, fill);
     painter.rect_stroke(rect, 1.5, egui::Stroke::new(if selected { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
     paint_corner_caps(painter, rect, edge);
