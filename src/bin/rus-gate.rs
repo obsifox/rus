@@ -105,6 +105,8 @@ struct Gate {
     rx: Option<Receiver<Msg>>,
     install_art: Option<egui::TextureHandle>,
     update_art: Option<egui::TextureHandle>,
+    install_blur: Option<egui::TextureHandle>,
+    update_blur: Option<egui::TextureHandle>,
     logo: Option<egui::TextureHandle>,
 }
 
@@ -112,8 +114,8 @@ impl Gate {
     fn new(cc: &eframe::CreationContext<'_>, shot: Option<String>) -> Self {
         install_font(&cc.egui_ctx);
         style_ui(&cc.egui_ctx);
-        let install_art = load_art(&cc.egui_ctx, "gate-install", include_bytes!("../../assets/gate-install.jpg"));
-        let update_art = load_art(&cc.egui_ctx, "gate-update", include_bytes!("../../assets/gate-update.jpg"));
+        let (install_art, install_blur) = load_pair(&cc.egui_ctx, "gate-install", include_bytes!("../../assets/gate-install.jpg"));
+        let (update_art, update_blur) = load_pair(&cc.egui_ctx, "gate-update", include_bytes!("../../assets/gate-update.jpg"));
         let logo = load_art(&cc.egui_ctx, "gate-logo", include_bytes!("../../assets/rus-logo-title.png"));
         let launch = shot.is_none() && (daily_launcher() || install_dir().is_some());
         let preview = shot.is_some();
@@ -136,6 +138,8 @@ impl Gate {
             rx: None,
             install_art,
             update_art,
+            install_blur,
+            update_blur,
             logo,
         };
         if launch {
@@ -247,9 +251,18 @@ impl Gate {
         } else {
             self.update_art.as_ref()
         };
+        let blur = if matches!(self.mode, Mode::Install) && !self.working {
+            self.install_blur.as_ref()
+        } else {
+            self.update_blur.as_ref()
+        };
         if let Some(art) = art {
             paint_cover(ui, art, full);
         }
+        if let Some(blur) = blur {
+            paint_cover(ui, blur, full);
+        }
+        paint_top_veil(ui.painter(), full);
         paint_bottom_shade(ui.painter(), full);
         if let Some(logo) = &self.logo {
             paint_title(ui, logo, full);
@@ -1126,9 +1139,48 @@ fn paint_exit(ui: &mut egui::Ui, full: egui::Rect) {
 
 fn load_art(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    Some(upload_rgba(ctx, name, &img))
+}
+
+fn load_pair(ctx: &egui::Context, name: &str, bytes: &[u8]) -> (Option<egui::TextureHandle>, Option<egui::TextureHandle>) {
+    let Some(img) = image::load_from_memory(bytes).ok() else {
+        return (None, None);
+    };
+    let rgba = img.to_rgba8();
+    let sharp = upload_rgba(ctx, name, &rgba);
+    let blur = upload_rgba(ctx, &format!("{name}-blur"), &frost(&rgba));
+    (Some(sharp), Some(blur))
+}
+
+fn upload_rgba(ctx: &egui::Context, name: &str, img: &image::RgbaImage) -> egui::TextureHandle {
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+    ctx.load_texture(name, color, egui::TextureOptions::LINEAR)
+}
+
+/// Blurred poster. Alpha is a soft band behind the title, gone above and below it.
+fn frost(img: &image::RgbaImage) -> image::RgbaImage {
+    let w = 540u32;
+    let h = ((img.height() as f32 / img.width().max(1) as f32) * w as f32).round().max(1.0) as u32;
+    let small = image::imageops::resize(img, w, h, image::imageops::FilterType::Triangle);
+    let mut blurred = image::imageops::blur(&small, 10.0);
+    let height = blurred.height().max(1) as f32;
+    for (y, row) in blurred.rows_mut().enumerate() {
+        let t = y as f32 / height;
+        let fade_in = ((t - 0.015) / 0.07).clamp(0.0, 1.0);
+        let fade_out = (1.0 - (t - 0.30) / 0.16).clamp(0.0, 1.0);
+        let edge = smooth(fade_in) * smooth(fade_out);
+        let alpha = (edge * 255.0) as u8;
+        for px in row {
+            px[3] = ((px[3] as u16 * alpha as u16) / 255) as u8;
+        }
+    }
+    blurred
+}
+
+fn smooth(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Corner radius is 3% of the shorter side.
@@ -1136,11 +1188,10 @@ fn corner_radius(full: egui::Rect) -> f32 {
     full.width().min(full.height()) * 0.03
 }
 
-fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
-    let size = tex.size();
+fn cover_uv(size: [usize; 2], full: egui::Rect) -> egui::Rect {
     let aspect = if size[1] == 0 { 9.0 / 16.0 } else { size[0] as f32 / size[1] as f32 };
     let window = full.width() / full.height().max(1.0);
-    let uv = if window > aspect {
+    if window > aspect {
         let shown = aspect / window;
         let y0 = (1.0 - shown) * 0.5;
         egui::Rect::from_min_max(egui::pos2(0.0, y0), egui::pos2(1.0, y0 + shown))
@@ -1148,7 +1199,12 @@ fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
         let shown = window / aspect.max(0.001);
         let x0 = (1.0 - shown) * 0.5;
         egui::Rect::from_min_max(egui::pos2(x0, 0.0), egui::pos2(x0 + shown, 1.0))
-    };
+    }
+}
+
+fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
+    let size = tex.size();
+    let uv = cover_uv(size, full);
     let radius = corner_radius(full).round().clamp(1.0, 255.0) as u8;
     egui::Image::from_texture((tex.id(), egui::vec2(size[0] as f32, size[1] as f32)))
         .uv(uv)
@@ -1156,22 +1212,49 @@ fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
         .paint_at(ui, full);
 }
 
-fn paint_title(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
+fn title_rect(tex: &egui::TextureHandle, full: egui::Rect) -> egui::Rect {
     let size = tex.size();
     let aspect = if size[1] == 0 { 896.0 / 460.0 } else { size[0] as f32 / size[1] as f32 };
     let w = (full.width() * 0.74).min(full.width() - 52.0);
     let h = w / aspect;
     // Both gates. Thirty pixels below the previous title.
-    let rect = egui::Rect::from_min_size(
+    egui::Rect::from_min_size(
         egui::pos2(full.center().x - w * 0.5, full.top() + 52.0),
         egui::vec2(w, h),
-    );
+    )
+}
+
+fn paint_title(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
+    let rect = title_rect(tex, full);
     ui.painter().image(
         tex.id(),
         rect,
         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+}
+
+fn paint_top_veil(painter: &egui::Painter, full: egui::Rect) {
+    let h = (full.height() * 0.46).clamp(260.0, 380.0);
+    let radius = corner_radius(full);
+    let steps = 48;
+    let mut mesh = egui::Mesh::default();
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let y = full.top() + h * t;
+        let fall = 1.0 - t;
+        let alpha = (fall.powf(1.15) * 210.0) as u8;
+        let color = egui::Color32::from_black_alpha(alpha);
+        let (left, right) = rounded_span(full, y, radius);
+        mesh.colored_vertex(egui::pos2(left, y), color);
+        mesh.colored_vertex(egui::pos2(right, y), color);
+        if i > 0 {
+            let b = mesh.vertices.len() as u32;
+            mesh.add_triangle(b - 4, b - 3, b - 2);
+            mesh.add_triangle(b - 3, b - 1, b - 2);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn paint_bottom_shade(painter: &egui::Painter, full: egui::Rect) {
