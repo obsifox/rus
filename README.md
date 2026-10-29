@@ -132,7 +132,7 @@ The release is Rus Gate. Download it once.
 
 | Platform | File |
 | --- | --- |
-| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.21/rus-gate.exe) |
+| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.22/rus-gate.exe) |
 
 <p align="center">
   <img src="docs/gate.png" alt="Rus Gate, showing the install folder on the blue poster" width="280">
@@ -143,7 +143,7 @@ Run `rus-gate.exe`. The window is vertical, with no title bar. First run shows t
 
 `Rus Launcher.exe` does not show the install step. With a connection it reads **tags**, not the release list, downloads `rus_{version}.exe` from that tag's release, and starts it. With no connection it starts the installed build.
 
-Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.21`.
+Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.22`.
 
 Linux builds from source with `cargo build --release`. The published release is the Windows gate.
 

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 const REPO: &str = "obsifox/rus";
 const WINDOW_W: f32 = 420.0;
-const WINDOW_H: f32 = 746.0;
+const WINDOW_H: f32 = 560.0;
 
 const BG: egui::Color32 = egui::Color32::from_rgb(0x16, 0x26, 0x5A);
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x10, 0x19, 0x40);
@@ -108,6 +108,8 @@ struct Gate {
     install_blur: Option<egui::TextureHandle>,
     update_blur: Option<egui::TextureHandle>,
     logo: Option<egui::TextureHandle>,
+    bar_empty: Option<egui::TextureHandle>,
+    bar_fill: Option<egui::TextureHandle>,
 }
 
 impl Gate {
@@ -117,9 +119,13 @@ impl Gate {
         let (install_art, install_blur) = load_pair(&cc.egui_ctx, "gate-install", include_bytes!("../../assets/gate-install.jpg"));
         let (update_art, update_blur) = load_pair(&cc.egui_ctx, "gate-update", include_bytes!("../../assets/gate-update.jpg"));
         let logo = load_art(&cc.egui_ctx, "gate-logo", include_bytes!("../../assets/rus-logo-title.png"));
+        let bar_empty = load_art(&cc.egui_ctx, "bar-empty", include_bytes!("../../assets/progressbar-emp.png"));
+        let bar_fill = load_art(&cc.egui_ctx, "bar-fill", include_bytes!("../../assets/progress-fill.png"));
         let launch = shot.is_none() && (daily_launcher() || install_dir().is_some());
         let preview = shot.is_some();
-        let preview_update = preview && std::env::var("RUS_GATE_PREVIEW").ok().as_deref() == Some("update");
+        let preview_kind = std::env::var("RUS_GATE_PREVIEW").ok();
+        let preview_update = preview && preview_kind.as_deref() == Some("update");
+        let preview_install = preview && preview_kind.as_deref() == Some("install");
         let mut me = Self {
             shot,
             shot_done: false,
@@ -130,17 +136,25 @@ impl Gate {
             } else {
                 default_install_dir()
             },
-            status: if preview_update { "Checking update".into() } else { String::new() },
+            status: if preview_update {
+                "Checking update".into()
+            } else if preview_install {
+                "Installing".into()
+            } else {
+                String::new()
+            },
             error: String::new(),
-            got: if preview_update { 42 } else { 0 },
-            total: if preview_update { 100 } else { 0 },
-            working: false,
+            got: if preview_update || preview_install { 58 } else { 0 },
+            total: if preview_update || preview_install { 100 } else { 0 },
+            working: preview_install,
             rx: None,
             install_art,
             update_art,
             install_blur,
             update_blur,
             logo,
+            bar_empty,
+            bar_fill,
         };
         if launch {
             if let Some(dir) = install_dir() {
@@ -246,16 +260,9 @@ impl eframe::App for Gate {
 
 impl Gate {
     fn paint(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let art = if matches!(self.mode, Mode::Install) && !self.working {
-            self.install_art.as_ref()
-        } else {
-            self.update_art.as_ref()
-        };
-        let blur = if matches!(self.mode, Mode::Install) && !self.working {
-            self.install_blur.as_ref()
-        } else {
-            self.update_blur.as_ref()
-        };
+        let install_screen = matches!(self.mode, Mode::Install);
+        let art = if install_screen { self.install_art.as_ref() } else { self.update_art.as_ref() };
+        let blur = if install_screen { self.install_blur.as_ref() } else { self.update_blur.as_ref() };
         if let Some(art) = art {
             paint_cover(ui, art, full);
         }
@@ -306,7 +313,7 @@ impl Gate {
     }
 
     fn paint_status(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
-        let bar = egui::Rect::from_min_size(egui::pos2(full.left() + 36.0, full.bottom() - 56.0), egui::vec2(full.width() - 72.0, 8.0));
+        let bar = stone_bar_rect(full);
         let raw = if self.error.is_empty() {
             if self.status.is_empty() { "Checking update" } else { self.status.as_str() }
         } else {
@@ -314,8 +321,7 @@ impl Gate {
         };
         let line = ellipsize(raw, 36);
         let color = if self.error.is_empty() { YELLOW } else { WARN };
-        ui.painter().text(egui::pos2(bar.left(), bar.top() - 18.0), egui::Align2::LEFT_CENTER, &line, body_font(16.0), color);
-        ui.painter().rect_filled(bar, 4.0, SURFACE);
+        ui.painter().text(egui::pos2(bar.left() + 18.0, bar.top() - 8.0), egui::Align2::LEFT_CENTER, &line, body_font(16.0), color);
         let frac = if self.total > 0 {
             (self.got as f32 / self.total as f32).clamp(0.0, 1.0)
         } else if self.working {
@@ -323,9 +329,8 @@ impl Gate {
         } else {
             0.0
         };
-        if frac > 0.0 {
-            let fill = egui::Rect::from_min_max(bar.left_top(), egui::pos2(bar.left() + bar.width() * frac, bar.bottom()));
-            ui.painter().rect_filled(fill, 4.0, YELLOW);
+        if let (Some(empty), Some(fill)) = (&self.bar_empty, &self.bar_fill) {
+            paint_stone_bar(ui, empty, fill, bar, frac);
         }
         if !self.working && !self.error.is_empty() && matches!(self.mode, Mode::Launch) {
             let retry = egui::Rect::from_min_size(egui::pos2(bar.right() - 148.0, bar.top() - 78.0), egui::vec2(148.0, 46.0));
@@ -336,6 +341,42 @@ impl Gate {
             }
         }
     }
+}
+
+fn stone_bar_rect(full: egui::Rect) -> egui::Rect {
+    let w = (full.width() - 28.0).max(180.0);
+    let h = w * (288.0 / 1291.0);
+    egui::Rect::from_min_size(
+        egui::pos2(full.center().x - w * 0.5, full.bottom() - 14.0 - h),
+        egui::vec2(w, h),
+    )
+}
+
+fn paint_stone_bar(ui: &mut egui::Ui, empty: &egui::TextureHandle, fill: &egui::TextureHandle, bar: egui::Rect, frac: f32) {
+    ui.painter().image(
+        empty.id(),
+        bar,
+        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+    if frac <= 0.004 {
+        return;
+    }
+    let slot = egui::Rect::from_min_max(
+        egui::pos2(bar.left() + bar.width() * 0.117, bar.top() + bar.height() * 0.337),
+        egui::pos2(bar.left() + bar.width() * 0.903, bar.top() + bar.height() * 0.653),
+    );
+    let filled = egui::Rect::from_min_max(
+        slot.left_top(),
+        egui::pos2(slot.left() + slot.width() * frac, slot.bottom()),
+    );
+    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(frac.clamp(0.02, 1.0), 1.0));
+    let radius = (slot.height() * 0.42).round().clamp(2.0, 18.0) as u8;
+    let size = fill.size();
+    egui::Image::from_texture((fill.id(), egui::vec2(size[0] as f32, size[1] as f32)))
+        .uv(uv)
+        .corner_radius(egui::CornerRadius::same(radius))
+        .paint_at(ui, filled);
 }
 
 fn ellipsize(text: &str, max: usize) -> String {
