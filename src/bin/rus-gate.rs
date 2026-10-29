@@ -105,6 +105,7 @@ struct Gate {
     rx: Option<Receiver<Msg>>,
     install_art: Option<egui::TextureHandle>,
     update_art: Option<egui::TextureHandle>,
+    logo: Option<egui::TextureHandle>,
 }
 
 impl Gate {
@@ -113,6 +114,7 @@ impl Gate {
         style_ui(&cc.egui_ctx);
         let install_art = load_art(&cc.egui_ctx, "gate-install", include_bytes!("../../assets/gate-install.jpg"));
         let update_art = load_art(&cc.egui_ctx, "gate-update", include_bytes!("../../assets/gate-update.jpg"));
+        let logo = load_art(&cc.egui_ctx, "gate-logo", include_bytes!("../../assets/rus-logo-title.png"));
         let launch = shot.is_none() && (daily_launcher() || install_dir().is_some());
         let preview = shot.is_some();
         let preview_update = preview && std::env::var("RUS_GATE_PREVIEW").ok().as_deref() == Some("update");
@@ -134,6 +136,7 @@ impl Gate {
             rx: None,
             install_art,
             update_art,
+            logo,
         };
         if launch {
             if let Some(dir) = install_dir() {
@@ -248,6 +251,9 @@ impl Gate {
             paint_cover(ui, art, full);
         }
         paint_bottom_shade(ui.painter(), full);
+        if let Some(logo) = &self.logo {
+            paint_title(ui, logo, full);
+        }
         paint_exit(ui, full);
         match self.mode {
             Mode::Install if !self.working => self.paint_form(ui, full),
@@ -1148,6 +1154,23 @@ fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
         .uv(uv)
         .corner_radius(egui::CornerRadius::same(radius))
         .paint_at(ui, full);
+}
+
+fn paint_title(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
+    let size = tex.size();
+    let aspect = if size[1] == 0 { 1465.0 / 353.0 } else { size[0] as f32 / size[1] as f32 };
+    let w = (full.width() * 0.74).min(full.width() - 52.0);
+    let h = w / aspect;
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(full.center().x - w * 0.5, full.top() + 22.0),
+        egui::vec2(w, h),
+    );
+    ui.painter().image(
+        tex.id(),
+        rect,
+        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
 }
 
 fn paint_bottom_shade(painter: &egui::Painter, full: egui::Rect) {
