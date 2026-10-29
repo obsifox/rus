@@ -21,6 +21,8 @@ struct Job {
     error: Option<String>,
     logs: Vec<String>,
     started: Option<Instant>,
+    opened: Option<Instant>,
+    log_path: PathBuf,
 }
 
 fn job() -> &'static Mutex<Job> {
@@ -33,6 +35,8 @@ fn job() -> &'static Mutex<Job> {
             error: None,
             logs: Vec::new(),
             started: None,
+            opened: None,
+            log_path: PathBuf::new(),
         })
     })
 }
@@ -112,13 +116,20 @@ pub fn start(app: Arc<App>) -> Result<Value, String> {
         let mut j = job().lock().unwrap();
         j.phase = "downloading".into();
         j.progress = 0.02;
-        j.message = "Starting Horizon…".into();
+        j.message = "Checking the Horizon release…".into();
         j.error = None;
         j.logs.clear();
         j.started = Some(Instant::now());
+        j.opened = None;
     }
     std::thread::spawn(move || {
-        if let Err(e) = run(&app) {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&app)));
+        let err = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e),
+            Err(_) => Some("Horizon stopped unexpectedly.".into()),
+        };
+        if let Some(e) = err {
             if let Ok(mut j) = job().lock() {
                 j.phase = "error".into();
                 j.error = Some(e.clone());
@@ -131,7 +142,79 @@ pub fn start(app: Arc<App>) -> Result<Value, String> {
         "preparing": true,
         "engine": "horizon",
         "version": "26.3",
+        "message": "Checking the Horizon release…",
     }))
+}
+
+pub struct View {
+    pub progress: f32,
+    pub message: String,
+    pub failed: bool,
+    pub busy: bool,
+    pub open: bool,
+}
+
+/// What the Home line should say. Polled every frame so Play does not sit on "Starting".
+pub fn view() -> View {
+    let j = job().lock().unwrap();
+    let busy = matches!(j.phase.as_str(), "downloading" | "extracting" | "preparing" | "launching");
+    View {
+        progress: j.progress as f32,
+        message: j.message.clone(),
+        failed: j.phase == "error",
+        busy,
+        open: j.phase == "ready",
+    }
+}
+
+/// The player pressed Stop. Do not treat that as a failed start.
+pub fn mark_stopped() {
+    if let Ok(mut j) = job().lock() {
+        if matches!(j.phase.as_str(), "ready" | "launching" | "error") {
+            j.phase = "idle".into();
+            j.message = "Stopped".into();
+            j.error = None;
+        }
+    }
+}
+
+/// If the client exited right after launch, surface the log instead of leaving Play on Starting.
+pub fn settle() {
+    let phase = job().lock().ok().map(|j| j.phase.clone()).unwrap_or_default();
+    if phase != "ready" {
+        return;
+    }
+    let running = crate::play::status()
+        .get("running")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if running {
+        return;
+    }
+    let opened = job().lock().ok().and_then(|j| j.opened);
+    let young = opened.map(|t| t.elapsed().as_secs() < 8).unwrap_or(true);
+    if !young {
+        if let Ok(mut j) = job().lock() {
+            if j.phase == "ready" {
+                j.phase = "idle".into();
+                j.message = "Horizon closed".into();
+            }
+        }
+        return;
+    }
+    let tail = log_tail();
+    let msg = if tail.is_empty() {
+        "Horizon closed before the window opened.".into()
+    } else {
+        format!("Horizon closed. {tail}")
+    };
+    if let Ok(mut j) = job().lock() {
+        if j.phase == "ready" {
+            j.phase = "error".into();
+            j.error = Some(msg.clone());
+            j.message = msg;
+        }
+    }
 }
 
 fn run(app: &App) -> Result<(), String> {
@@ -161,62 +244,71 @@ fn run(app: &App) -> Result<(), String> {
 
     let client = find_bin(app, "horizon-client").ok_or("horizon-client was not in the archive")?;
     let prepare = find_bin(app, "horizon-prepare").ok_or("horizon-prepare was not in the archive")?;
-    let bin_dir = client.parent().unwrap_or(&root).to_path_buf();
+    let release = release_root(&client)?;
+    let minecraft = minecraft_dir(app)?;
 
-    if find_resources(app).is_none() {
+    let resources_dir = release.join(".local/horizon-client/26.3");
+    if !resources_dir.join("horizon-resources.json").is_file() {
         set_phase("preparing", 0.55, "Downloading the 26.3 server jar…");
         let server_jar = ensure_server_jar(app)?;
         let java_exe = java::resolve(app, "java-runtime-epsilon", 25)
             .or_else(|| java::resolve(app, "java-runtime-delta", 21))
-            .ok_or("Java 25 was not found. Install 26.3 (the Java patch) or set a Java path in Settings.")?;
+            .ok_or("Java 25 was not found. Install 26.3 first, or set a Java path in Settings.")?;
         let java_home = java_exe
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| java_exe.clone());
         set_phase("preparing", 0.62, "Preparing Horizon from your 26.3 install…");
+        let server_jar_s = server_jar.to_string_lossy().to_string();
+        let minecraft_s = minecraft.to_string_lossy().to_string();
+        let release_s = release.to_string_lossy().to_string();
         run_tool(
             &prepare,
-            &bin_dir,
+            &release,
             &java_home,
             &[
                 "--prepare",
                 "--server-jar",
-                &server_jar.to_string_lossy(),
+                &server_jar_s,
                 "--minecraft-dir",
-                &app.dir.to_string_lossy(),
+                &minecraft_s,
                 "--root",
-                &bin_dir.to_string_lossy(),
+                &release_s,
             ],
         )?;
         set_phase("preparing", 0.82, "Copying sounds…");
-        // Sounds are optional. A failure leaves the game silent, it does not block launch.
         if let Err(e) = run_tool(
             &prepare,
-            &bin_dir,
+            &release,
             &java_home,
-            &[
-                "sounds",
-                "--minecraft-dir",
-                &app.dir.to_string_lossy(),
-                "--root",
-                &bin_dir.to_string_lossy(),
-            ],
+            &["sounds", "--minecraft-dir", &minecraft_s, "--root", &release_s],
         ) {
             log_line(format!("sounds skipped: {e}"));
         }
     }
 
-    let resources = find_resources(app).ok_or("Horizon prepared no resources. Check the log and try again.")?;
-    set_phase("launching", 0.94, "Launching Horizon…");
+    let resources = if resources_dir.join("horizon-resources.json").is_file() {
+        resources_dir
+    } else {
+        find_resources(app).ok_or("Horizon prepared no resources. Check the log and try again.")?
+    };
+    set_phase("launching", 0.94, "Opening Horizon…");
     let settings = app.settings();
-    let (bin, prefix, seal) = crate::sandbox::prepare(&client, app);
-    let mut cmd = Command::new(&bin);
-    cmd.current_dir(&bin_dir);
-    for arg in prefix {
-        cmd.arg(arg);
-    }
-    crate::sandbox::apply_env(&mut cmd, app);
+    let home = app.p("horizon/home");
+    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    prefer_dx12(&home);
+    let mut cmd = Command::new(&client);
+    cmd.current_dir(&home);
+    cmd.env("HORIZON_HOME", &home);
+    cmd.env("HOME", &home);
+    cmd.env("USERPROFILE", &home);
+    cmd.env("APPDATA", home.join("AppData/Roaming"));
+    cmd.env("LOCALAPPDATA", home.join("AppData/Local"));
+    cmd.env("HORIZON_PLAYER_NAME", &settings.username);
+    // Vulkan leaves the first screen frozen on some Windows GPUs. DirectX 12 gets past it.
+    #[cfg(windows)]
+    cmd.env("WGPU_BACKEND", "dx12");
     cmd.arg("--resources")
         .arg(&resources)
         .arg("--name")
@@ -225,38 +317,38 @@ fn run(app: &App) -> Result<(), String> {
         .arg(settings.width.to_string())
         .arg("--height")
         .arg(settings.height.to_string());
-    if settings.fullscreen {
-        // Horizon has no --fullscreen flag; the window size is enough.
-    }
-    cmd.env("HORIZON_PLAYER_NAME", &settings.username);
     let log_path = app.p("logs/horizon-26.3.log");
+    if let Ok(mut j) = job().lock() {
+        j.log_path = log_path.clone();
+    }
     if let Some(parent) = log_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let _ = fs::write(
         &log_path,
         format!(
-            "engine: horizon\nsandbox: {}\nclient: {}\nresources: {}\n\n",
-            seal.label,
+            "engine: horizon\nclient: {}\nresources: {}\nhome: {}\n\n",
             client.display(),
-            resources.display()
+            resources.display(),
+            home.display()
         ),
     );
-    if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-        if let Ok(err) = f.try_clone() {
-            cmd.stdout(Stdio::from(f)).stderr(Stdio::from(err));
-        }
-    }
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("Could not open the Horizon log: {e}"))?;
+    let err = log.try_clone().map_err(|e| format!("Could not open the Horizon log: {e}"))?;
+    cmd.stdout(Stdio::from(log)).stderr(Stdio::from(err)).stdin(Stdio::null());
     crate::play::hide_console(&mut cmd);
-    cmd.stdin(Stdio::null());
     let child = cmd.spawn().map_err(|e| format!("Failed to start Horizon: {e}"))?;
-    crate::sandbox::attach(&child);
     let pid = child.id();
     play::adopt("26.3", "horizon", child);
     if let Ok(mut j) = job().lock() {
         j.phase = "ready".into();
         j.progress = 1.0;
-        j.message = format!("Horizon running · pid {pid}");
+        j.opened = Some(Instant::now());
+        j.message = format!("Horizon is open · pid {pid}");
         j.error = None;
     }
     Ok(())
@@ -458,6 +550,76 @@ fn find_resources(app: &App) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn release_root(client: &Path) -> Result<PathBuf, String> {
+    let mut cur = client.parent().map(|p| p.to_path_buf());
+    while let Some(dir) = cur {
+        if dir.join("research-lock.json").is_file() {
+            return Ok(dir);
+        }
+        cur = dir.parent().map(|p| p.to_path_buf());
+    }
+    Err("The Horizon download has no research-lock.json. Delete the horizon folder and try Play again.".into())
+}
+
+fn minecraft_dir(app: &App) -> Result<PathBuf, String> {
+    let json = app.p("versions/26.3/26.3.json");
+    let jar = app.p("versions/26.3/26.3.jar");
+    if json.is_file() && jar.is_file() {
+        return Ok(app.dir.clone());
+    }
+    let lib = crate::instances::library_dir(app, "26.3");
+    if lib.join("26.3.json").is_file() && lib.join("26.3.jar").is_file() {
+        let dest = app.p("versions/26.3");
+        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+        if !json.is_file() {
+            fs::copy(lib.join("26.3.json"), &json).map_err(|e| e.to_string())?;
+        }
+        if !jar.is_file() && fs::hard_link(lib.join("26.3.jar"), &jar).is_err() {
+            fs::copy(lib.join("26.3.jar"), &jar).map_err(|e| e.to_string())?;
+        }
+        return Ok(app.dir.clone());
+    }
+    Err("Install Minecraft 26.3 first. Horizon prepares its files from that copy.".into())
+}
+
+fn prefer_dx12(home: &Path) {
+    #[cfg(windows)]
+    {
+        let path = home.join("horizon-graphics.txt");
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        if text.lines().any(|l| l.trim().starts_with("graphicsApi:") && !l.contains("auto")) {
+            return;
+        }
+        let mut lines: Vec<String> = text
+            .lines()
+            .filter(|l| !l.trim().starts_with("graphicsApi:"))
+            .map(|l| l.to_string())
+            .collect();
+        lines.push("graphicsApi:dx12".into());
+        let _ = fs::write(&path, lines.join("\n") + "\n");
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
+    }
+}
+
+fn log_tail() -> String {
+    let path = job().lock().ok().map(|j| j.log_path.clone()).unwrap_or_default();
+    let bytes = fs::read(&path).unwrap_or_default();
+    let text = String::from_utf8_lossy(&bytes);
+    let line = text
+        .lines()
+        .rev()
+        .find(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("engine:") && !t.starts_with("client:") && !t.starts_with("resources:") && !t.starts_with("home:")
+        })
+        .unwrap_or("")
+        .trim();
+    line.chars().take(160).collect()
 }
 
 fn installed_tag(app: &App) -> String {

@@ -464,6 +464,13 @@ impl super::super::Desktop {
 
     pub(crate) fn paint_chrome(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let horizon_on = self.engine == "horizon";
+        if horizon_on {
+            crate::horizon::settle();
+            let view = crate::horizon::view();
+            if view.busy || view.failed || view.open {
+                self.notice = view.message;
+            }
+        }
         self.paint_instance_card(ui, full);
 
         let play_h = 50.0;
@@ -471,7 +478,9 @@ impl super::super::Desktop {
         let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
         let installed = self.app.is_installed(&version);
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
-        let installing = self.job_state().as_deref() == Some("running");
+        let horizon_view = horizon_on.then(crate::horizon::view);
+        let horizon_busy = horizon_view.as_ref().is_some_and(|v| v.busy);
+        let installing = self.job_state().as_deref() == Some("running") || horizon_busy;
         let bar_h = if installing { 16.0 } else { 0.0 };
         let bar_gap = if installing { 8.0 } else { 0.0 };
         let play = egui::Rect::from_min_size(
@@ -499,7 +508,11 @@ impl super::super::Desktop {
         paint_diamond(ui.painter(), egui::pos2(play.right() - note_w - 14.0, note_y), GOLD);
         ui.painter().text(egui::pos2(play.right() - 2.0, note_y), egui::Align2::RIGHT_CENTER, &note, note_font, GOLD);
         if installing {
-            let progress = self.job_line().map(|(p, _)| p).unwrap_or(0.0);
+            let progress = if horizon_busy {
+                horizon_view.as_ref().map(|v| v.progress).unwrap_or(0.0)
+            } else {
+                self.job_line().map(|(p, _)| p).unwrap_or(0.0)
+            };
             let track = egui::Rect::from_min_size(egui::pos2(play.right() - 280.0, play.bottom() + bar_gap), egui::vec2(280.0, bar_h));
             paint_download_bar(ui.painter(), track, progress);
         }

@@ -730,13 +730,11 @@ impl Desktop {
         if self.engine == "horizon" {
             let app = self.app.clone();
             let tx = self.tx.clone();
-            self.notice = "Preparing Horizon…".into();
+            self.notice = "Checking the Horizon release…".into();
             std::thread::spawn(move || {
-                let msg = match crate::horizon::start(app) {
-                    Ok(v) => v.get("message").and_then(|m| m.as_str()).unwrap_or("Horizon is starting").to_string(),
-                    Err(e) => e,
-                };
-                let _ = tx.send(Msg::Notice(msg));
+                if let Err(e) = crate::horizon::start(app) {
+                    let _ = tx.send(Msg::Notice(e));
+                }
             });
             return;
         }
@@ -869,6 +867,9 @@ impl Desktop {
     fn play(&mut self) {
         let running = crate::play::status();
         if running.get("running").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if self.engine == "horizon" {
+                crate::horizon::mark_stopped();
+            }
             let _ = crate::play::kill();
             self.notice = "Stopped".into();
             return;
