@@ -2371,18 +2371,18 @@ fn nav_font(size: f32) -> egui::FontId {
 
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    // Material 3 type is Roboto. Icons are Google's Material Icons Outlined.
+    // Program lettering for title, body, and subtext. Icons stay Material.
+    fonts.font_data.insert("Lettering".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/RUS-Launcher-Lettering-Regular.ttf")).into());
     fonts.font_data.insert("Roboto400".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/Roboto-400.ttf")).into());
-    fonts.font_data.insert("Roboto500".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/Roboto-500.ttf")).into());
-    fonts.font_data.insert("Roboto700".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/Roboto-700.ttf")).into());
     fonts.font_data.insert("Material".into(), egui::FontData::from_static(include_bytes!("../assets/MaterialSymbols.ttf")).into());
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Roboto400".into());
-    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Roboto400".into());
-    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Roboto700".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Roboto500".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Nav".into()), vec!["Roboto500".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Roboto400".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Roboto400".into()]);
+    let text = vec!["Lettering".into(), "Roboto400".into()];
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Lettering".into());
+    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Lettering".into());
+    fonts.families.insert(egui::FontFamily::Name("Title".into()), text.clone());
+    fonts.families.insert(egui::FontFamily::Name("Tab".into()), text.clone());
+    fonts.families.insert(egui::FontFamily::Name("Nav".into()), text.clone());
+    fonts.families.insert(egui::FontFamily::Name("Body".into()), text.clone());
+    fonts.families.insert(egui::FontFamily::Name("Sub".into()), text);
     fonts.families.insert(egui::FontFamily::Name("Icons".into()), vec!["Material".into()]);
     ctx.set_fonts(fonts);
 }
