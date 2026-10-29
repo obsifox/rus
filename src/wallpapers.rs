@@ -159,6 +159,14 @@ fn version_is(id: &str, prefix: &str) -> bool {
         || id.starts_with(&format!("{prefix}-"))
 }
 
+/// Square art for the rail. Only versions whose desktop wallpaper crops to an empty field.
+pub fn square(title: &str) -> Option<&'static [u8]> {
+    match title {
+        "Tiny Takeover" => Some(include_bytes!("../assets/wallpapers/squares/tiny-takeover.jpg")),
+        _ => None,
+    }
+}
+
 pub fn embedded(title: &str) -> Option<&'static [u8]> {
     Some(match title {
         "Java Edition" => include_bytes!("../assets/wallpapers/java-edition.jpg"),

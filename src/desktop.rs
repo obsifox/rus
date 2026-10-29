@@ -1166,6 +1166,11 @@ impl Desktop {
                     self.papers.insert(paper.title.to_string(), tex);
                 }
             }
+            if let Some(bytes) = wallpapers::square(paper.title) {
+                if let Some(tex) = load_texture(ctx, &format!("{}#sq", paper.title), bytes) {
+                    self.papers.insert(format!("{}#sq", paper.title), tex);
+                }
+            }
         }
     }
 

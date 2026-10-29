@@ -60,29 +60,38 @@ impl super::super::Desktop {
         }
         profile.on_hover_text(name);
 
-        let mode = egui::Rect::from_min_max(egui::pos2(rail.left() + 6.0, 50.0), egui::pos2(rail.right() - 6.0, 98.0));
-        for (i, label) in ["Installed", "Explore"].into_iter().enumerate() {
-            let rect = egui::Rect::from_min_size(egui::pos2(mode.left(), mode.top() + i as f32 * 24.0), egui::vec2(mode.width(), 22.0));
-            let on = self.rail_view as usize == i;
+        let btn = 30.0;
+        let gap = 6.0;
+        let x0 = rail.center().x - (btn * 2.0 + gap) * 0.5;
+        let y0 = 50.0;
+        for (i, kind) in [0u8, 1u8].into_iter().enumerate() {
+            let rect = egui::Rect::from_min_size(egui::pos2(x0 + i as f32 * (btn + gap), y0), egui::vec2(btn, btn));
+            let on = self.rail_view == kind;
             let hit = ui.interact(rect, egui::Id::new("rail-mode").with(i), Sense::click());
             let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered() || on, 0.14);
             let fill = if on {
-                egui::Color32::from_rgba_unmultiplied(0x2C, 0x24, 0x12, 180 + (hot * 40.0) as u8)
+                egui::Color32::from_rgba_unmultiplied(0x2C, 0x24, 0x12, 190 + (hot * 40.0) as u8)
             } else {
-                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (18.0 + hot * 20.0) as u8)
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (16.0 + hot * 28.0) as u8)
             };
-            ui.painter().rect_filled(rect, 6.0, fill);
+            ui.painter().rect_filled(rect, 8.0, fill);
             if on {
-                ui.painter().rect_stroke(rect, 6.0, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
+                ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
             }
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, nav_font(10.0), if on { GOLD } else { HY_TEXT });
+            let ink = if on { GOLD } else { HY_TEXT };
+            if kind == 0 {
+                paint_installed_icon(ui.painter(), rect.center(), 15.0, ink);
+            } else {
+                paint_globe_icon(ui.painter(), rect.center(), 15.0, ink);
+            }
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
-            if hit.clicked() && self.rail_view as usize != i {
-                self.rail_view = i as u8;
+            if hit.clicked() && self.rail_view != kind {
+                self.rail_view = kind;
                 crate::sfx::toggle();
             }
+            hit.on_hover_text(if kind == 0 { "Installed" } else { "Explore" });
         }
         let typing = ui.memory(|m| m.focused().is_some());
         if !typing {
@@ -93,7 +102,7 @@ impl super::super::Desktop {
                 self.rail_nudge -= 68.0;
             }
         }
-        let list = egui::Rect::from_min_max(egui::pos2(rail.left() + 4.0, 104.0), egui::pos2(rail.right() - 4.0, full.bottom() - 46.0));
+        let list = egui::Rect::from_min_max(egui::pos2(rail.left() + 4.0, 88.0), egui::pos2(rail.right() - 4.0, full.bottom() - 46.0));
         let versions = self.rail_versions();
         let ids: Vec<String> = if self.rail_view == 0 {
             versions.into_iter().filter(|id| self.app.is_installed(id)).collect()
@@ -359,10 +368,17 @@ impl super::super::Desktop {
                 let square = egui::Rect::from_center_size(egui::pos2(slot.center().x, slot.top() + 24.0), egui::vec2(side, side));
                 let on = self.selected == *id || (self.selected.is_empty() && id == "26.3");
                 let paper = self.paper_for(id);
-                if let Some(tex) = self.papers.get(paper.title) {
-                    let focus = if paper.title == "Tiny Takeover" { (0.70, 0.36) } else { (0.5, 0.42) };
-                    let uv = cover_focus(tex.size_vec2(), square, focus.0, focus.1);
-                    ui.painter().image(tex.id(), square, uv, egui::Color32::WHITE);
+                let sq_key = format!("{}#sq", paper.title);
+                if let Some(tex) = self.papers.get(&sq_key).or_else(|| self.papers.get(paper.title)) {
+                    let uv = if self.papers.contains_key(&sq_key) {
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))
+                    } else {
+                        cover_focus(tex.size_vec2(), square, 0.5, 0.42)
+                    };
+                    ui.painter().add(
+                        egui::epaint::RectShape::filled(square, 4.0, egui::Color32::WHITE)
+                            .with_texture(tex.id(), uv),
+                    );
                 } else {
                     ui.painter().rect_filled(square, 4.0, egui::Color32::from_rgb(28, 28, 32));
                 }
@@ -767,6 +783,43 @@ impl super::super::Desktop {
         });
     }
 
+}
+
+/// Installed: a package with a downward arrow. Same weight as the globe beside it.
+fn paint_installed_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.6, color);
+    let box_r = egui::Rect::from_center_size(c + egui::vec2(0.0, s * 0.22), egui::vec2(s * 0.72, s * 0.46));
+    painter.rect_stroke(box_r, 1.5, stroke, egui::StrokeKind::Inside);
+    let lid_y = box_r.top() + s * 0.14;
+    painter.line_segment(
+        [egui::pos2(box_r.left() + 1.0, lid_y), egui::pos2(box_r.right() - 1.0, lid_y)],
+        stroke,
+    );
+    let tip = egui::pos2(c.x, box_r.top() - s * 0.06);
+    painter.line_segment([egui::pos2(c.x, tip.y - s * 0.26), tip], stroke);
+    painter.line_segment([tip + egui::vec2(-s * 0.13, -s * 0.12), tip], stroke);
+    painter.line_segment([tip + egui::vec2(s * 0.13, -s * 0.12), tip], stroke);
+}
+
+/// Explore: a globe, not a word.
+fn paint_globe_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.6, color);
+    let r = s * 0.40;
+    painter.circle_stroke(c, r, stroke);
+    painter.line_segment([c + egui::vec2(-r, 0.0), c + egui::vec2(r, 0.0)], stroke);
+    painter.line_segment([c + egui::vec2(0.0, -r), c + egui::vec2(0.0, r)], stroke);
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for i in 0..=8 {
+        let t = i as f32 / 8.0;
+        let y = -r + t * 2.0 * r;
+        let k = (1.0 - (y / r).powi(2)).max(0.0).sqrt();
+        let x = r * 0.46 * k;
+        left.push(c + egui::vec2(-x, y));
+        right.push(c + egui::vec2(x, y));
+    }
+    painter.add(egui::Shape::line(left, stroke));
+    painter.add(egui::Shape::line(right, stroke));
 }
 
 fn quiet_scroll(id: impl std::hash::Hash) -> egui::ScrollArea {
