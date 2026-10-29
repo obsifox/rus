@@ -59,6 +59,7 @@ fn run(shot: Option<String>) -> Result<(), String> {
         .with_max_inner_size([WINDOW_W, WINDOW_H])
         .with_decorations(false)
         .with_resizable(false)
+        .with_transparent(true)
         .with_title("Rus Gate")
         .with_icon(icon_data());
     let options = eframe::NativeOptions { viewport, ..Default::default() };
@@ -210,10 +211,9 @@ impl eframe::App for Gate {
         fit_windows_frame();
         place_fitted_window(ctx, egui::vec2(WINDOW_W, WINDOW_H), 0.42, 0.72);
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BG))
+            .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 let full = ui.max_rect();
-                ui.painter().rect_filled(full, 0.0, BG);
                 self.paint(ui, full);
             });
         if self.shot.is_some() {
@@ -245,7 +245,7 @@ impl Gate {
             self.update_art.as_ref()
         };
         if let Some(art) = art {
-            paint_cover(ui.painter(), art, full);
+            paint_cover(ui, art, full);
         }
         paint_bottom_shade(ui.painter(), full);
         paint_exit(ui, full);
@@ -919,10 +919,23 @@ fn fit_windows_frame() {
         fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
         fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, value: isize) -> isize;
         fn SetWindowPos(hwnd: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn GetClientRect(hwnd: *mut c_void, rect: *mut WinRect) -> i32;
+        fn SetWindowRgn(hwnd: *mut c_void, rgn: *mut c_void, redraw: i32) -> i32;
+    }
+    #[link(name = "gdi32")]
+    extern "system" {
+        fn CreateRoundRectRgn(left: i32, top: i32, right: i32, bottom: i32, width: i32, height: i32) -> *mut c_void;
     }
     #[link(name = "dwmapi")]
     extern "system" {
         fn DwmExtendFrameIntoClientArea(hwnd: *mut c_void, margins: *const Margins) -> i32;
+    }
+    #[repr(C)]
+    struct WinRect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
     }
     let name: Vec<u16> = "Rus Gate\0".encode_utf16().collect();
     let hwnd = unsafe { FindWindowW(std::ptr::null(), name.as_ptr()) };
@@ -953,6 +966,21 @@ fn fit_windows_frame() {
         }
         let margins = Margins { cx_left: -1, cx_right: -1, cy_top: -1, cy_bottom: -1 };
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        let mut rect = WinRect { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetClientRect(hwnd, &mut rect) != 0 {
+            let w = rect.right - rect.left;
+            let h = rect.bottom - rect.top;
+            static LAST: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+            let key = w.wrapping_mul(10000).wrapping_add(h);
+            if LAST.swap(key, Ordering::Relaxed) != key && w > 0 && h > 0 {
+                // Same 3% as the painted poster. Ellipse size is the corner diameter.
+                let diameter = ((w.min(h) as f32) * 0.06).round().max(2.0) as i32;
+                let rgn = CreateRoundRectRgn(0, 0, w, h, diameter, diameter);
+                if !rgn.is_null() {
+                    SetWindowRgn(hwnd, rgn, 1);
+                }
+            }
+        }
     }
 }
 
@@ -1097,29 +1125,59 @@ fn load_art(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::Textu
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
 }
 
-fn paint_cover(painter: &egui::Painter, tex: &egui::TextureHandle, full: egui::Rect) {
+/// Corner radius is 3% of the shorter side.
+fn corner_radius(full: egui::Rect) -> f32 {
+    full.width().min(full.height()) * 0.03
+}
+
+fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
     let size = tex.size();
-    let aspect = if size[1] == 0 { 840.0 / 1492.0 } else { size[0] as f32 / size[1] as f32 };
+    let aspect = if size[1] == 0 { 9.0 / 16.0 } else { size[0] as f32 / size[1] as f32 };
     let window = full.width() / full.height().max(1.0);
-    let (w, h) = if window > aspect {
-        (full.width(), full.width() / aspect)
+    let uv = if window > aspect {
+        let shown = aspect / window;
+        let y0 = (1.0 - shown) * 0.5;
+        egui::Rect::from_min_max(egui::pos2(0.0, y0), egui::pos2(1.0, y0 + shown))
     } else {
-        (full.height() * aspect, full.height())
+        let shown = window / aspect.max(0.001);
+        let x0 = (1.0 - shown) * 0.5;
+        egui::Rect::from_min_max(egui::pos2(x0, 0.0), egui::pos2(x0 + shown, 1.0))
     };
-    let rect = egui::Rect::from_center_size(full.center(), egui::vec2(w, h));
-    painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+    let radius = corner_radius(full).round().clamp(1.0, 255.0) as u8;
+    egui::Image::from_texture((tex.id(), egui::vec2(size[0] as f32, size[1] as f32)))
+        .uv(uv)
+        .corner_radius(egui::CornerRadius::same(radius))
+        .paint_at(ui, full);
 }
 
 fn paint_bottom_shade(painter: &egui::Painter, full: egui::Rect) {
     let h = 168.0;
+    let radius = corner_radius(full);
     let top = full.bottom() - h;
     let mut y = top;
     while y < full.bottom() {
         let t = ((y - top) / h).clamp(0.0, 1.0);
         let alpha = (t * t * 110.0) as u8;
-        painter.hline(full.x_range(), y, egui::Stroke::new(1.15, egui::Color32::from_black_alpha(alpha)));
+        let (left, right) = rounded_span(full, y, radius);
+        painter.hline(left..=right, y, egui::Stroke::new(1.15, egui::Color32::from_black_alpha(alpha)));
         y += 1.0;
     }
+}
+
+fn rounded_span(full: egui::Rect, y: f32, radius: f32) -> (f32, f32) {
+    let edge = if y - full.top() < radius {
+        radius - (y - full.top())
+    } else if full.bottom() - y < radius {
+        radius - (full.bottom() - y)
+    } else {
+        0.0
+    };
+    let inset = if edge <= 0.0 {
+        0.0
+    } else {
+        radius - (radius * radius - edge * edge).max(0.0).sqrt()
+    };
+    (full.left() + inset, full.right() - inset)
 }
 
 fn fit_middle(ui: &egui::Ui, text: &str, font: egui::FontId, max_w: f32) -> String {
