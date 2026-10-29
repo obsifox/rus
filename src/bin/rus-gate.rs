@@ -362,20 +362,20 @@ fn paint_stone_bar(ui: &mut egui::Ui, empty: &egui::TextureHandle, fill: &egui::
     if frac <= 0.004 {
         return;
     }
+    // The 1048×46 fill sits inside the 1291×288 frame at (120, 121).
+    // Its own alpha already rounds the ends. Do not stretch it over the stone.
     let slot = egui::Rect::from_min_max(
-        egui::pos2(bar.left() + bar.width() * 0.117, bar.top() + bar.height() * 0.337),
-        egui::pos2(bar.left() + bar.width() * 0.903, bar.top() + bar.height() * 0.653),
+        egui::pos2(bar.left() + bar.width() * (120.0 / 1291.0), bar.top() + bar.height() * (121.0 / 288.0)),
+        egui::pos2(bar.left() + bar.width() * (1168.0 / 1291.0), bar.top() + bar.height() * (167.0 / 288.0)),
     );
     let filled = egui::Rect::from_min_max(
         slot.left_top(),
         egui::pos2(slot.left() + slot.width() * frac, slot.bottom()),
     );
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(frac.clamp(0.02, 1.0), 1.0));
-    let radius = (slot.height() * 0.42).round().clamp(2.0, 18.0) as u8;
     let size = fill.size();
     egui::Image::from_texture((fill.id(), egui::vec2(size[0] as f32, size[1] as f32)))
         .uv(uv)
-        .corner_radius(egui::CornerRadius::same(radius))
         .paint_at(ui, filled);
 }
 
