@@ -21,6 +21,7 @@ mod play;
 mod preview3d;
 mod raster;
 mod sandbox;
+mod sfx;
 mod skin;
 mod skinmodel;
 mod state;

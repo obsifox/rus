@@ -17,10 +17,40 @@ pub struct Instance {
     /// Shown in the three slots beside the version bar. At most three stay on.
     #[serde(default)]
     pub pinned: bool,
+    /// `26.3/vanilla 26.3`. Empty means the older `instances/{id}` folder.
+    #[serde(default)]
+    pub folder: String,
+}
+
+/// Shared vanilla client for one version. Downloaded once.
+pub fn library_dir(app: &App, version: &str) -> PathBuf {
+    app.p(&format!("instances/library_{}", sanitize(version)))
+}
+
+/// Isolated copy: `instances/26.3/vanilla 26.3`.
+pub fn path_of(app: &App, inst: &Instance) -> PathBuf {
+    if inst.folder.is_empty() {
+        app.p(&format!("instances/{}", inst.id))
+    } else {
+        app.p(&format!("instances/{}", inst.folder))
+    }
 }
 
 pub fn dir(app: &App, id: &str) -> PathBuf {
-    app.p(&format!("instances/{id}"))
+    load(app)
+        .into_iter()
+        .find(|i| i.id == id)
+        .map(|inst| path_of(app, &inst))
+        .unwrap_or_else(|| app.p(&format!("instances/{id}")))
+}
+
+fn sanitize(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { ' ' } else { c })
+        .collect();
+    let flat = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() { "client".into() } else { flat }
 }
 
 pub fn load(app: &App) -> Vec<Instance> {
@@ -42,11 +72,16 @@ pub fn create(name: &str, version: &str, loader: &str) -> Instance {
     let version = if version.trim().is_empty() { "26.3".to_string() } else { version.trim().to_string() };
     let name = {
         let n = name.trim();
-        if n.is_empty() { version.clone() } else { n.to_string() }
+        if n.is_empty() || n == version {
+            format!("vanilla {version}")
+        } else {
+            n.to_string()
+        }
     };
     let loader = if loader.trim().is_empty() { "vanilla".to_string() } else { loader.trim().to_string() };
     Instance {
         id: format!("{:x}{:02x}", now_ms(), name.len() as u8),
+        folder: format!("{}/{}", sanitize(&version), sanitize(&name)),
         name,
         version,
         loader,
@@ -74,7 +109,8 @@ mod tests {
     #[test]
     fn blank_name_uses_the_version() {
         let inst = create("  ", "1.21.11", "fabric");
-        assert_eq!(inst.name, "1.21.11");
+        assert_eq!(inst.name, "vanilla 1.21.11");
+        assert_eq!(inst.folder, "1.21.11/vanilla 1.21.11");
         assert_eq!(inst.version, "1.21.11");
         assert_eq!(inst.loader, "fabric");
         assert!(!inst.id.is_empty());

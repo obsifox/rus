@@ -64,7 +64,12 @@ pub fn build_command_join(app: &App, id: &str, server: Option<&str>) -> Result<(
 
 pub fn build_command_at(app: &App, id: &str, game_dir: &std::path::Path, server: Option<&str>) -> Result<(Command, PathBuf), String> {
     let settings = app.settings();
-    let version_dir = app.p(&format!("versions/{id}"));
+    let library = crate::instances::library_dir(app, id);
+    let version_dir = if library.join(format!("{id}.json")).exists() && library.join(format!("{id}.jar")).exists() {
+        library
+    } else {
+        app.p(&format!("versions/{id}"))
+    };
     if !version_dir.join(format!("{id}.json")).exists() {
         return Err(format!("{id} is not installed"));
     }

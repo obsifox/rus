@@ -287,7 +287,9 @@ impl App {
     }
 
     pub fn is_installed(&self, id: &str) -> bool {
-        self.p("versions").join(id).join(format!("{id}.json")).exists()
+        let named = format!("{id}.json");
+        self.p("versions").join(id).join(&named).exists()
+            || crate::instances::library_dir(self, id).join(named).exists()
     }
 }
 

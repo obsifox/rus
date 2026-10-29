@@ -388,7 +388,7 @@ impl super::super::Desktop {
                 self.draft_version.clone()
             };
             let inst = crate::instances::create(&self.draft_name, &version, "vanilla");
-            let _ = std::fs::create_dir_all(crate::instances::dir(&self.app, &inst.id));
+            let _ = std::fs::create_dir_all(crate::instances::path_of(&self.app, &inst));
             self.instance_id = inst.id.clone();
             self.selected = inst.version.clone();
             self.loader = inst.loader.clone();

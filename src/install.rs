@@ -408,6 +408,7 @@ fn run_inner(app: Arc<App>, job: Arc<Mutex<Job>>) -> Result<(), String> {
     let meta = mojang::version_meta(&app, &id)?;
     let meta_txt = serde_json::to_string_pretty(&meta).unwrap_or_default();
     fs::write(version_dir.join(format!("{id}.json")), &meta_txt).map_err(|e| e.to_string())?;
+    mirror_client(&app, &id, &version_dir);
     prog.set(0.03, "Version identified");
 
     // ---------- 1. vanilla core: libraries + client jar ----------
@@ -450,6 +451,7 @@ fn run_inner(app: Arc<App>, job: Arc<Mutex<Job>>) -> Result<(), String> {
                 })?;
             }
             log(&job, format!("client jar ok ({})", dest.display()));
+            mirror_client(&app, &id, &version_dir);
         }
         if let Ok(mut j) = job.lock() {
             if let Some(p) = j.patch("vanilla") {
@@ -668,11 +670,26 @@ fn run_inner(app: Arc<App>, job: Arc<Mutex<Job>>) -> Result<(), String> {
     Ok(())
 }
 
+fn mirror_client(app: &App, id: &str, version_dir: &std::path::Path) {
+    let lib = crate::instances::library_dir(app, id);
+    let _ = fs::create_dir_all(&lib);
+    for name in [format!("{id}.json"), format!("{id}.jar")] {
+        let src = version_dir.join(&name);
+        if src.exists() {
+            let _ = fs::copy(&src, lib.join(name));
+        }
+    }
+}
+
 /// Delete an installed version (keeps shared libraries/assets).
 pub fn uninstall(app: &App, id: &str) -> Result<(), String> {
     let vdir = app.p(&format!("versions/{id}"));
     if vdir.exists() {
         fs::remove_dir_all(&vdir).map_err(|e| e.to_string())?;
+    }
+    let lib = crate::instances::library_dir(app, id);
+    if lib.exists() {
+        fs::remove_dir_all(&lib).map_err(|e| e.to_string())?;
     }
     let gdir = app.game_dir(id);
     if gdir.exists() {

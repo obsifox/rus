@@ -18,7 +18,7 @@ mod tabs;
 
 const WINDOW_W: f32 = 960.0;
 const WINDOW_H: f32 = 540.0;
-pub(crate) const HOME_RAIL: f32 = 112.0;
+pub(crate) const HOME_RAIL: f32 = 86.0;
 
 const HY_BG: egui::Color32 = egui::Color32::from_rgb(0x15, 0x24, 0x3A);
 const HY_SURFACE: egui::Color32 = egui::Color32::from_rgb(0x1C, 0x2F, 0x4B);
@@ -126,6 +126,7 @@ struct Desktop {
     tab: Tab,
     home_pane: u8,
     home_menu: bool,
+    rail_view: u8,
     rail_nudge: f32,
     versions: Vec<Ver>,
     versions_note: String,
@@ -256,6 +257,7 @@ impl Desktop {
             tab: Tab::from_name(&tab),
             home_pane: 0,
             home_menu: false,
+            rail_view: 1,
             rail_nudge: 0.0,
             versions: Vec::new(),
             versions_note: "Loading versions…".into(),
@@ -1079,6 +1081,9 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
+        if self.tab == Tab::Home {
+            self.paint_version_veil(ui, full);
+        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -2235,6 +2240,23 @@ fn contain_rect(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
     }
     let scale = (dst.width() / src.x).min(dst.height() / src.y);
     egui::Rect::from_center_size(dst.center(), src * scale)
+}
+
+fn cover_focus(src: egui::Vec2, dst: egui::Rect, fx: f32, fy: f32) -> egui::Rect {
+    if src.x <= 0.0 || src.y <= 0.0 || dst.width() <= 0.0 || dst.height() <= 0.0 {
+        return egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+    }
+    let src_aspect = src.x / src.y;
+    let dst_aspect = dst.width() / dst.height();
+    if src_aspect > dst_aspect {
+        let visible = dst_aspect / src_aspect;
+        let x = (fx - visible * 0.5).clamp(0.0, (1.0 - visible).max(0.0));
+        egui::Rect::from_min_max(egui::pos2(x, 0.0), egui::pos2(x + visible, 1.0))
+    } else {
+        let visible = src_aspect / dst_aspect;
+        let y = (fy - visible * 0.5).clamp(0.0, (1.0 - visible).max(0.0));
+        egui::Rect::from_min_max(egui::pos2(0.0, y), egui::pos2(1.0, y + visible))
+    }
 }
 
 fn cover_uv(src: egui::Vec2, dst: egui::Rect) -> egui::Rect {
