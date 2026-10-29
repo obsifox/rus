@@ -12,7 +12,7 @@ impl super::super::Desktop {
         child.set_clip_rect(inner);
         match page {
             Page::Mods => self.page_mods(&mut child),
-            Page::Settings => self.page_settings(&mut child),
+            Page::Settings => {}
         }
     }
 

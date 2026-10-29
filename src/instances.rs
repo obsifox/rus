@@ -73,7 +73,7 @@ pub fn create(name: &str, version: &str, loader: &str) -> Instance {
     let name = {
         let n = name.trim();
         if n.is_empty() || n == version {
-            format!("vanilla {version}")
+            format!("{} {version}", crate::state::loader_title(loader))
         } else {
             n.to_string()
         }
@@ -109,8 +109,8 @@ mod tests {
     #[test]
     fn blank_name_uses_the_version() {
         let inst = create("  ", "1.21.11", "fabric");
-        assert_eq!(inst.name, "vanilla 1.21.11");
-        assert_eq!(inst.folder, "1.21.11/vanilla 1.21.11");
+        assert_eq!(inst.name, "Fabric 1.21.11");
+        assert_eq!(inst.folder, "1.21.11/Fabric 1.21.11");
         assert_eq!(inst.version, "1.21.11");
         assert_eq!(inst.loader, "fabric");
         assert!(!inst.id.is_empty());

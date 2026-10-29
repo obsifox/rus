@@ -14,6 +14,7 @@ use eframe::egui::{self, CursorIcon, Sense, ViewportCommand};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
@@ -207,11 +208,7 @@ impl eframe::App for Gate {
         self.pump(ctx);
         #[cfg(windows)]
         fit_windows_frame();
-        if let Some(size) = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size())) {
-            if (size.x - WINDOW_W).abs() > 1.0 || (size.y - WINDOW_H).abs() > 1.0 {
-                ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WINDOW_W, WINDOW_H)));
-            }
-        }
+        place_fitted_window(ctx, egui::vec2(WINDOW_W, WINDOW_H), 0.42, 0.72);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG))
             .show(ctx, |ui| {
@@ -961,15 +958,53 @@ fn fit_windows_frame() {
 
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("Lexend700".into(), egui::FontData::from_static(include_bytes!("../../assets/hytale/Lexend-700.ttf")).into());
-    fonts.font_data.insert("Lexend800".into(), egui::FontData::from_static(include_bytes!("../../assets/hytale/Lexend-800.ttf")).into());
-    fonts.font_data.insert("Nunito400".into(), egui::FontData::from_static(include_bytes!("../../assets/hytale/NunitoSans-400.ttf")).into());
-    fonts.font_data.insert("Nunito500".into(), egui::FontData::from_static(include_bytes!("../../assets/hytale/NunitoSans-500.ttf")).into());
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Nunito400".into());
-    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Lexend700".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Nav".into()), vec!["Lexend800".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Nunito500".into()]);
+    fonts.font_data.insert("Roboto400".into(), egui::FontData::from_static(include_bytes!("../../assets/fonts/Roboto-400.ttf")).into());
+    fonts.font_data.insert("Roboto500".into(), egui::FontData::from_static(include_bytes!("../../assets/fonts/Roboto-500.ttf")).into());
+    fonts.font_data.insert("Roboto700".into(), egui::FontData::from_static(include_bytes!("../../assets/fonts/Roboto-700.ttf")).into());
+    fonts.font_data.insert("Material".into(), egui::FontData::from_static(include_bytes!("../../assets/MaterialSymbols.ttf")).into());
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Roboto400".into());
+    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Roboto700".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Nav".into()), vec!["Roboto500".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Roboto400".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Icons".into()), vec!["Material".into()]);
     ctx.set_fonts(fonts);
+}
+
+fn place_fitted_window(ctx: &egui::Context, design: egui::Vec2, frac_w: f32, frac_h: f32) {
+    static ZOOM_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static STAGE: AtomicU8 = AtomicU8::new(0);
+    let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) else {
+        return;
+    };
+    if monitor.x < 240.0 || monitor.y < 240.0 {
+        return;
+    }
+    let stored = ZOOM_BITS.load(Ordering::Relaxed);
+    let zoom = if stored == 0 {
+        if (ctx.zoom_factor() - 1.0).abs() > 0.02 {
+            return;
+        }
+        let want = (monitor.x * frac_w / design.x).min(monitor.y * frac_h / design.y);
+        let cap = (monitor.x * 0.92 / design.x).min(monitor.y * 0.92 / design.y);
+        let zoom = if cap < 1.0 { cap.clamp(0.62, 1.0) } else { want.clamp(1.0, cap.min(2.6)) };
+        ZOOM_BITS.store(zoom.to_bits(), Ordering::Relaxed);
+        zoom
+    } else {
+        f32::from_bits(stored)
+    };
+    if (ctx.zoom_factor() - zoom).abs() > 0.02 {
+        ctx.set_zoom_factor(zoom);
+    }
+    ctx.send_viewport_cmd(ViewportCommand::InnerSize(design));
+    let stage = STAGE.load(Ordering::Relaxed);
+    if stage < 8 {
+        if stage >= 2 {
+            if let Some(cmd) = ViewportCommand::center_on_screen(ctx) {
+                ctx.send_viewport_cmd(cmd);
+            }
+        }
+        STAGE.store(stage + 1, Ordering::Relaxed);
+    }
 }
 
 fn style_ui(ctx: &egui::Context) {
@@ -1040,10 +1075,13 @@ fn paint_exit(ui: &mut egui::Ui, full: egui::Rect) {
     let exit = egui::Rect::from_center_size(center, egui::vec2(16.0, 16.0));
     let hit = ui.interact(exit, egui::Id::new("gate-exit"), Sense::click());
     let color = if hit.hovered() { egui::Color32::from_rgb(255, 236, 176) } else { GOLD };
-    let arm = h * 0.92;
-    let stroke = egui::Stroke::new(1.15, color);
-    ui.painter().line_segment([center + egui::vec2(-arm, -arm), center + egui::vec2(arm, arm)], stroke);
-    ui.painter().line_segment([center + egui::vec2(arm, -arm), center + egui::vec2(-arm, arm)], stroke);
+    ui.painter().text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        "\u{E5CD}",
+        egui::FontId::new(16.0, egui::FontFamily::Name("Icons".into())),
+        color,
+    );
     if hit.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }

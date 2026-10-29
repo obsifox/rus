@@ -8,7 +8,7 @@ use eframe::egui::{self, CursorIcon, ResizeDirection, RichText, Sense, ViewportC
 use image::RgbaImage;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -158,9 +158,11 @@ struct Desktop {
     icons_dirty: bool,
     avatar: Option<egui::TextureHandle>,
     avatar_key: String,
+    import_icons: HashMap<String, egui::TextureHandle>,
     mods: Vec<(String, bool, u64)>,
     username: String,
     ram: u32,
+    jvm_args: String,
     width: u32,
     height: u32,
     snapshots: bool,
@@ -211,6 +213,8 @@ struct Desktop {
     draft_open: bool,
     draft_name: String,
     draft_version: String,
+    draft_loader: String,
+    draft_name_touched: bool,
 }
 
 pub fn run(shot: Option<String>, tab: String) -> Result<(), String> {
@@ -289,9 +293,11 @@ impl Desktop {
             icons_dirty: true,
             avatar: None,
             avatar_key: String::new(),
+            import_icons: HashMap::new(),
             mods: Vec::new(),
             username: settings.username,
             ram: settings.ram_mb,
+            jvm_args: settings.jvm_args,
             width: settings.width,
             height: settings.height,
             snapshots: settings.show_snapshots,
@@ -342,6 +348,8 @@ impl Desktop {
             draft_open: false,
             draft_name: String::new(),
             draft_version,
+            draft_loader: "vanilla".into(),
+            draft_name_touched: false,
         };
         if me.tour {
             me.tab = Tab::Home;
@@ -533,6 +541,7 @@ impl Desktop {
         let mut s = self.app.settings();
         s.username = self.username.clone();
         s.ram_mb = self.ram;
+        s.jvm_args = self.jvm_args.clone();
         s.width = self.width;
         s.height = self.height;
         s.show_snapshots = self.snapshots;
@@ -992,11 +1001,81 @@ impl Desktop {
     }
 
     fn import_path(&mut self, kind: &str, path: &std::path::Path) {
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("import");
         match std::fs::read(path) {
-            Ok(bytes) => self.import_bytes(kind, &bytes),
+            Ok(bytes) => match crate::skin::import_named(&self.app, kind, &bytes, stem) {
+                Ok(id) => {
+                    if kind == "cape" { self.cape = id; } else { self.skin = id; self.preview.arms = ArmModel::Auto; }
+                    self.import_error.clear();
+                    self.avatar_key.clear();
+                    self.preview.invalidate();
+                    self.save_settings();
+                }
+                Err(e) => self.import_error = e,
+            },
             Err(e) => self.import_error = e.to_string(),
         }
     }
+
+    fn choose_skin(&mut self, id: &str) {
+        self.skin = id.to_string();
+        self.preview.arms = if id == "preset:alex" {
+            ArmModel::Slim
+        } else if id == "preset:steve" {
+            ArmModel::Classic
+        } else {
+            ArmModel::Auto
+        };
+        self.preview.invalidate();
+        self.avatar_key.clear();
+        self.save_settings();
+    }
+
+    fn choose_cape(&mut self, id: &str) {
+        self.cape = id.to_string();
+        self.preview.invalidate();
+        self.save_settings();
+    }
+
+    fn ensure_import_icon(&mut self, ctx: &egui::Context, kind: &str, id: &str) {
+        let key = format!("{kind}:{id}");
+        if self.import_icons.contains_key(&key) {
+            return;
+        }
+        let Some(path) = crate::skin::resolve_texture(&self.app, id) else { return };
+        let Ok(bytes) = std::fs::read(path) else { return };
+        let Ok(img) = image::load_from_memory(&bytes) else { return };
+        let img = img.to_rgba8();
+        let (thumb, name) = if kind == "cape" {
+            (cape_face_icon(&img), format!("cape-icon-{id}"))
+        } else {
+            let Ok(prepared) = crate::skinmodel::prepare_skin(&img) else { return };
+            (crate::skinmodel::face_avatar(&prepared, 32), format!("skin-icon-{id}"))
+        };
+        let color = egui::ColorImage::from_rgba_unmultiplied(
+            [thumb.width() as usize, thumb.height() as usize],
+            thumb.as_raw(),
+        );
+        self.import_icons.insert(key, ctx.load_texture(name, color, egui::TextureOptions::NEAREST));
+    }
+}
+
+fn cape_face_icon(src: &image::RgbaImage) -> image::RgbaImage {
+    // Back face of a 64×32 cape is 10×16 at (12, 1). Scale it so the chip reads as cloth.
+    let mut out = image::RgbaImage::new(20, 32);
+    for y in 0..32 {
+        for x in 0..20 {
+            let sx = 12 + (x * 10) / 20;
+            let sy = 1 + (y * 16) / 32;
+            let c = if sx < src.width() && sy < src.height() {
+                *src.get_pixel(sx, sy)
+            } else {
+                image::Rgba([0, 0, 0, 0])
+            };
+            out.put_pixel(x, y, c);
+        }
+    }
+    out
 }
 
 impl eframe::App for Desktop {
@@ -1040,11 +1119,15 @@ impl eframe::App for Desktop {
             .frame(egui::Frame::new().fill(BG))
             .show(ctx, |ui| self.shell(ui));
         paint_frame(ctx);
-        let size = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()));
-        if let Some(size) = size {
-            if (size.x - WINDOW_W).abs() > 1.0 || (size.y - WINDOW_H).abs() > 1.0 {
-                ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WINDOW_W, WINDOW_H)));
-            }
+        if self.tour {
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(WINDOW_W, WINDOW_H)));
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(40.0, 30.0)));
+        } else {
+            place_fitted_window(ctx, egui::vec2(WINDOW_W, WINDOW_H), 0.60, 0.60);
+        }
+        if std::env::var("RUS_DRAFT").ok().as_deref() == Some("1") && self.frames == 2 {
+            let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+            self.open_instance_draft(&version);
         }
         self.frames += 1;
         // winit 0.30 puts WS_CAPTION back on an undecorated window. On some
@@ -1131,11 +1214,7 @@ impl Desktop {
             }
         }
         self.paint_home_rail(ui, full);
-        if self.tab == Tab::Home {
-            self.paint_version_bar(ui, full);
-        } else {
-            self.paint_page_icons(ui);
-        }
+        self.paint_version_bar(ui, full);
         if self.tab != Tab::Home || !self.home_menu {
             self.paint_title_logo(ui, full);
         }
@@ -1170,7 +1249,7 @@ impl Desktop {
             }
             Tab::Versions => self.paint_version_page(ui, full),
             Tab::Mods => self.paint_mods_page(ui, full),
-            Tab::Settings => self.page_in_panel(ui, full, Page::Settings),
+            Tab::Settings => self.paint_settings_page(ui, full),
         }
         let age = (now - self.tab_tick) as f32;
         let fade = ease_out((age / 0.18).clamp(0.0, 1.0));
@@ -1655,11 +1734,9 @@ fn play_button(ui: &mut egui::Ui, id: &str, rect: egui::Rect, label: &str, stop:
     let group = text_w + 22.0;
     let tri = egui::pos2(rect.center().x - group * 0.5 + 6.0, rect.center().y);
     if stop {
-        let bar = 2.2;
-        ui.painter().rect_filled(egui::Rect::from_center_size(tri + egui::vec2(-3.0, 0.0), egui::vec2(bar, 12.0)), 0.5, ink);
-        ui.painter().rect_filled(egui::Rect::from_center_size(tri + egui::vec2(3.0, 0.0), egui::vec2(bar, 12.0)), 0.5, ink);
+        paint_material(ui.painter(), tri, 16.0, I_STOP, ink);
     } else {
-        paint_play_tri(ui.painter(), tri, 11.0, ink);
+        paint_play_tri(ui.painter(), tri, 16.0, ink);
     }
     ui.painter().text(egui::pos2(tri.x + 16.0, rect.center().y), egui::Align2::LEFT_CENTER, label, font, ink);
     if hit.hovered() {
@@ -1681,84 +1758,32 @@ fn empty_gold(hot: bool) -> egui::Color32 {
 }
 
 fn paint_empty_cross(painter: &egui::Painter, center: egui::Pos2, size: f32, color: egui::Color32) {
-    let h = size * 0.46;
-    let stroke = egui::Stroke::new(1.15, color);
-    painter.line_segment([center + egui::vec2(-h, -h), center + egui::vec2(h, h)], stroke);
-    painter.line_segment([center + egui::vec2(h, -h), center + egui::vec2(-h, h)], stroke);
+    paint_material(painter, center, size * 1.35, I_CLOSE, color);
 }
 
 fn paint_play_tri(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    painter.add(egui::Shape::convex_polygon(
-        vec![c + egui::vec2(-s * 0.32, -s * 0.48), c + egui::vec2(s * 0.48, 0.0), c + egui::vec2(-s * 0.32, s * 0.48)],
-        color,
-        egui::Stroke::NONE,
-    ));
+    paint_material(painter, c, s.max(14.0), I_PLAY, color);
 }
 
 fn paint_chevron(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32, down: bool) {
-    let stroke = egui::Stroke::new(1.35, color);
-    if down {
-        painter.line_segment([c + egui::vec2(-s, -s * 0.35), c + egui::vec2(0.0, s * 0.4)], stroke);
-        painter.line_segment([c + egui::vec2(0.0, s * 0.4), c + egui::vec2(s, -s * 0.35)], stroke);
-    } else {
-        painter.line_segment([c + egui::vec2(-s * 0.3, -s), c + egui::vec2(s * 0.42, 0.0)], stroke);
-        painter.line_segment([c + egui::vec2(s * 0.42, 0.0), c + egui::vec2(-s * 0.3, s)], stroke);
-    }
+    let icon = if down { I_DOWN } else { '\u{E5CC}' };
+    paint_material(painter, c, (s * 2.6).max(14.0), icon, color);
 }
 
 fn paint_search_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.4, color);
-    painter.circle_stroke(c + egui::vec2(-s * 0.12, -s * 0.1), s * 0.36, stroke);
-    painter.line_segment([c + egui::vec2(s * 0.12, s * 0.14), c + egui::vec2(s * 0.42, s * 0.42)], stroke);
+    paint_material(painter, c, s.max(14.0), I_SEARCH, color);
 }
 
 fn paint_tick(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.6, color);
-    painter.line_segment([c + egui::vec2(-s * 0.45, 0.0), c + egui::vec2(-s * 0.08, s * 0.38)], stroke);
-    painter.line_segment([c + egui::vec2(-s * 0.08, s * 0.38), c + egui::vec2(s * 0.5, -s * 0.38)], stroke);
+    paint_material(painter, c, s.max(14.0), I_CHECK, color);
 }
 
 fn paint_trash(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.25, color);
-    painter.line_segment([c + egui::vec2(-s * 0.36, -s * 0.22), c + egui::vec2(s * 0.36, -s * 0.22)], stroke);
-    painter.line_segment([c + egui::vec2(-s * 0.14, -s * 0.22), c + egui::vec2(-s * 0.14, -s * 0.42)], stroke);
-    painter.line_segment([c + egui::vec2(-s * 0.14, -s * 0.42), c + egui::vec2(s * 0.14, -s * 0.42)], stroke);
-    painter.line_segment([c + egui::vec2(s * 0.14, -s * 0.42), c + egui::vec2(s * 0.14, -s * 0.22)], stroke);
-    let body = egui::Rect::from_center_size(c + egui::vec2(0.0, s * 0.14), egui::vec2(s * 0.64, s * 0.52));
-    painter.rect_stroke(body, 1.0, stroke, egui::StrokeKind::Inside);
+    paint_material(painter, c, s.max(14.0), I_DELETE, color);
 }
 
 fn paint_tab_glyph(painter: &egui::Painter, tab: Tab, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let stroke = egui::Stroke::new((s * 0.09).max(1.2), color);
-    match tab {
-        Tab::Home => paint_nav_house(painter, c, s, color),
-        Tab::Versions => {
-            let top = c + egui::vec2(0.0, -s * 0.42);
-            let right = c + egui::vec2(s * 0.46, -s * 0.16);
-            let left = c + egui::vec2(-s * 0.46, -s * 0.16);
-            let bot = c + egui::vec2(0.0, s * 0.46);
-            let mr = c + egui::vec2(s * 0.46, s * 0.18);
-            let ml = c + egui::vec2(-s * 0.46, s * 0.18);
-            for pair in [(left, top), (top, right), (right, mr), (mr, bot), (bot, ml), (ml, left), (left, right), (top, bot)] {
-                painter.line_segment([pair.0, pair.1], stroke);
-            }
-        }
-        Tab::Mods => {
-            let box_r = egui::Rect::from_center_size(c + egui::vec2(1.0, 1.5), egui::vec2(s * 0.62, s * 0.62));
-            painter.rect_stroke(box_r, 2.0, stroke, egui::StrokeKind::Inside);
-            painter.line_segment([c + egui::vec2(-s * 0.08, -s * 0.42), c + egui::vec2(-s * 0.08, -s * 0.16)], stroke);
-            painter.line_segment([c + egui::vec2(-s * 0.22, -s * 0.28), c + egui::vec2(s * 0.06, -s * 0.28)], stroke);
-            painter.circle_stroke(c + egui::vec2(s * 0.2, 0.02), s * 0.11, stroke);
-        }
-        Tab::Settings => {
-            painter.circle_stroke(c, s * 0.16, stroke);
-            for i in 0..8 {
-                let a = i as f32 * std::f32::consts::TAU / 8.0;
-                let dir = egui::vec2(a.cos(), a.sin());
-                painter.line_segment([c + dir * s * 0.28, c + dir * s * 0.46], stroke);
-            }
-        }
-    }
+    paint_material(painter, c, s.max(16.0), tab_icon(tab), color);
 }
 
 fn paint_exit_icon(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
@@ -1818,9 +1843,7 @@ fn paint_gear(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
 }
 
 fn paint_clock(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
-    painter.circle_stroke(c, 7.0, egui::Stroke::new(1.5, color));
-    painter.line_segment([c, c + egui::vec2(0.0, -4.0)], egui::Stroke::new(1.5, color));
-    painter.line_segment([c, c + egui::vec2(3.0, 1.0)], egui::Stroke::new(1.5, color));
+    paint_material(painter, c, 16.0, I_CLOCK, color);
 }
 
 fn paint_diamond(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
@@ -2347,28 +2370,18 @@ fn nav_font(size: f32) -> egui::FontId {
 
 fn install_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    // Faces downloaded from hytale.com: Lexend and Nunito Sans, every weight the site declares.
-    fonts.font_data.insert("Lexend300".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-300.ttf")).into());
-    fonts.font_data.insert("Lexend400".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-400.ttf")).into());
-    fonts.font_data.insert("Lexend500".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-500.ttf")).into());
-    fonts.font_data.insert("Lexend600".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-600.ttf")).into());
-    fonts.font_data.insert("Lexend700".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-700.ttf")).into());
-    fonts.font_data.insert("Lexend800".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/Lexend-800.ttf")).into());
-    fonts.font_data.insert("Nunito300".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-300.ttf")).into());
-    fonts.font_data.insert("Nunito400".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-400.ttf")).into());
-    fonts.font_data.insert("Nunito500".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-500.ttf")).into());
-    fonts.font_data.insert("Nunito600".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-600.ttf")).into());
-    fonts.font_data.insert("Nunito700".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-700.ttf")).into());
-    fonts.font_data.insert("Nunito800".into(), egui::FontData::from_static(include_bytes!("../assets/hytale/NunitoSans-800.ttf")).into());
+    // Material 3 type is Roboto. Icons are Google's Material Icons Outlined.
+    fonts.font_data.insert("Roboto400".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/Roboto-400.ttf")).into());
+    fonts.font_data.insert("Roboto500".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/Roboto-500.ttf")).into());
+    fonts.font_data.insert("Roboto700".into(), egui::FontData::from_static(include_bytes!("../assets/fonts/Roboto-700.ttf")).into());
     fonts.font_data.insert("Material".into(), egui::FontData::from_static(include_bytes!("../assets/MaterialSymbols.ttf")).into());
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Nunito400".into());
-    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Nunito400".into());
-    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Lexend700".into(), "Nunito700".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Lexend600".into(), "Nunito600".into()]);
-    // hytale.com #navigation-links is Lexend, and the header links are extra-bold.
-    fonts.families.insert(egui::FontFamily::Name("Nav".into()), vec!["Lexend800".into(), "Nunito800".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Nunito500".into(), "Lexend500".into()]);
-    fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Nunito300".into(), "Lexend300".into()]);
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "Roboto400".into());
+    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "Roboto400".into());
+    fonts.families.insert(egui::FontFamily::Name("Title".into()), vec!["Roboto700".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Tab".into()), vec!["Roboto500".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Nav".into()), vec!["Roboto500".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Body".into()), vec!["Roboto400".into()]);
+    fonts.families.insert(egui::FontFamily::Name("Sub".into()), vec!["Roboto400".into()]);
     fonts.families.insert(egui::FontFamily::Name("Icons".into()), vec!["Material".into()]);
     ctx.set_fonts(fonts);
 }
@@ -2609,6 +2622,56 @@ fn rus_hwnd() -> *mut std::os::raw::c_void {
     unsafe { FindWindowW(std::ptr::null(), name.as_ptr()) }
 }
 
+/// Logical layout stays at the design size. Zoom makes that layout fill about
+/// `frac_w` / `frac_h` of the monitor, then the window is centered. Monitor size
+/// from egui is already divided by the current zoom, so multiply it back before
+/// choosing the next zoom or the window shrinks every frame.
+fn place_fitted_window(ctx: &egui::Context, design: egui::Vec2, frac_w: f32, frac_h: f32) {
+    static ZOOM_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static STAGE: AtomicU8 = AtomicU8::new(0);
+    let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) else {
+        return;
+    };
+    if monitor.x < 240.0 || monitor.y < 240.0 {
+        return;
+    }
+    // Measure once, while zoom is still 1. A later monitor size is already
+    // divided by the zoom we just set, and using it again makes the window grow.
+    let stored = ZOOM_BITS.load(Ordering::Relaxed);
+    let zoom = if stored == 0 {
+        if (ctx.zoom_factor() - 1.0).abs() > 0.02 {
+            return;
+        }
+        let zoom = fit_zoom(monitor, design, frac_w, frac_h);
+        ZOOM_BITS.store(zoom.to_bits(), Ordering::Relaxed);
+        zoom
+    } else {
+        f32::from_bits(stored)
+    };
+    if (ctx.zoom_factor() - zoom).abs() > 0.02 {
+        ctx.set_zoom_factor(zoom);
+    }
+    ctx.send_viewport_cmd(ViewportCommand::InnerSize(design));
+    let stage = STAGE.load(Ordering::Relaxed);
+    if stage < 8 {
+        if stage >= 2 {
+            if let Some(cmd) = ViewportCommand::center_on_screen(ctx) {
+                ctx.send_viewport_cmd(cmd);
+            }
+        }
+        STAGE.store(stage + 1, Ordering::Relaxed);
+    }
+}
+
+fn fit_zoom(monitor: egui::Vec2, design: egui::Vec2, frac_w: f32, frac_h: f32) -> f32 {
+    let want = (monitor.x * frac_w / design.x).min(monitor.y * frac_h / design.y);
+    let cap = (monitor.x * 0.92 / design.x).min(monitor.y * 0.92 / design.y);
+    if cap < 1.0 {
+        return cap.clamp(0.62, 1.0);
+    }
+    want.clamp(1.0, cap.min(2.6))
+}
+
 /// Drop the caption winit leaves on a borderless window, then ask Windows to
 /// rebuild the frame so the picture starts at the top-left instead of under a
 /// black bar.
@@ -2805,14 +2868,22 @@ const V_PREVIEW: egui::Color32 = egui::Color32::from_rgb(110, 78, 40);
 const V_PREVIEW_INK: egui::Color32 = HY_ACCENT;
 
 const I_HOME: char = '\u{E88A}';
+const I_SETTINGS: char = '\u{E8B8}';
 const I_LAYERS: char = '\u{E53B}';
-const I_CUBE: char = '\u{F720}';
+const I_CUBE: char = '\u{E87B}';
 const I_FLARE: char = '\u{E3E4}';
 const I_CLOCK: char = '\u{E8B5}';
 const I_DOWN: char = '\u{E5DB}';
 const I_FOLDER: char = '\u{E2C7}';
 const I_ADD: char = '\u{E145}';
 const I_CLOSE: char = '\u{E5CD}';
+const I_GLOBE: char = '\u{E80B}';
+const I_SEARCH: char = '\u{E8B6}';
+const I_PLAY: char = '\u{E037}';
+const I_STOP: char = '\u{E047}';
+const I_DELETE: char = '\u{E872}';
+const I_CHECK: char = '\u{E5CA}';
+const I_DOWNLOAD: char = '\u{E2C4}';
 
 fn drect(full: egui::Rect, x: f32, y: f32, w: f32, h: f32) -> egui::Rect {
     egui::Rect::from_min_max(egui::pos2(ux(full, x), uy(full, y)), egui::pos2(ux(full, x + w), uy(full, y + h)))
@@ -2823,7 +2894,7 @@ fn tab_icon(tab: Tab) -> char {
         Tab::Home => I_HOME,
         Tab::Versions => I_LAYERS,
         Tab::Mods => I_CUBE,
-        Tab::Settings => I_FLARE,
+        Tab::Settings => I_SETTINGS,
     }
 }
 

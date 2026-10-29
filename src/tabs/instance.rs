@@ -44,16 +44,16 @@ impl super::super::Desktop {
         ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, &count, nav_font(11.0), HY_ACCENT);
         let new_btn = egui::Rect::from_min_size(egui::pos2(head.right() - 86.0, head.top() + 3.0), egui::vec2(86.0, 28.0));
         if opaque_button(ui, new_btn, "NEW", true) {
-            self.draft_name.clear();
-            self.draft_version = if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() };
-            self.draft_open = true;
+            let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+            self.open_instance_draft(&version);
         }
         let list = egui::Rect::from_min_max(egui::pos2(col.left() + 10.0, head.bottom() + 6.0), egui::pos2(col.right() - 10.0, col.bottom() - 8.0));
         if self.instances.is_empty() {
             let btn = egui::Rect::from_center_size(list.center(), egui::vec2(220.0, 36.0));
             ui.painter().text(egui::pos2(list.center().x, list.center().y - 28.0), egui::Align2::CENTER_CENTER, "No instances yet", body_font(15.0), HY_MUTED);
             if opaque_button(ui, btn, "Create instance", true) {
-                self.draft_open = true;
+                let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
+                self.open_instance_draft(&version);
             }
             return;
         }
@@ -312,7 +312,7 @@ impl super::super::Desktop {
         let dim = ui.interact(full, egui::Id::new("instance-overlay"), Sense::click());
         ui.painter().rect_filled(full, 0.0, egui::Color32::from_black_alpha(150));
         // Room under the buttons so the bar stroke is not clipped by the card.
-        let card = egui::Rect::from_center_size(full.center(), egui::vec2(680.0, 404.0));
+        let card = egui::Rect::from_center_size(full.center(), egui::vec2(700.0, 456.0));
         paint_hytale_bar(ui.painter(), card);
         if dim.clicked() {
             if let Some(at) = dim.interact_pointer_pos() {
@@ -329,19 +329,42 @@ impl super::super::Desktop {
         ui.painter().text(
             egui::pos2(left, card.top() + 50.0),
             egui::Align2::LEFT_CENTER,
-            "A separate world, options, and mods folder.",
+            "Name this copy and choose its loader. Nothing is downloaded yet.",
             sub_font(12.0),
             MUTED,
         );
         paint_faded_rule(ui.painter(), left, card.top() + 66.0, width);
-        ui.painter().text(egui::pos2(left, card.top() + 84.0), egui::Align2::LEFT_CENTER, "Name", sub_font(12.0), MUTED);
-        let field_rect = egui::Rect::from_min_size(egui::pos2(left, card.top() + 96.0), egui::vec2(width, 36.0));
+        ui.painter().text(egui::pos2(left, card.top() + 78.0), egui::Align2::LEFT_CENTER, "Name", sub_font(12.0), MUTED);
+        let field_rect = egui::Rect::from_min_size(egui::pos2(left, card.top() + 90.0), egui::vec2(width, 34.0));
+        let name_before = self.draft_name.clone();
         paint_popup_field(ui, field_rect, &mut self.draft_name, "Survival, creative, test…");
+        if self.draft_name != name_before {
+            self.draft_name_touched = true;
+        }
 
-        ui.painter().text(egui::pos2(left, card.top() + 152.0), egui::Align2::LEFT_CENTER, "Version", sub_font(12.0), MUTED);
+        ui.painter().text(egui::pos2(left, card.top() + 136.0), egui::Align2::LEFT_CENTER, "Loader", sub_font(12.0), MUTED);
+        let loaders = ["vanilla", "forge", "fabric", "neoforge", "optifine"];
+        let chip_gap = 8.0;
+        let chip_w = (width - chip_gap * 4.0) / 5.0;
+        let mut picked_loader: Option<String> = None;
+        for (i, id) in loaders.iter().enumerate() {
+            let chip = egui::Rect::from_min_size(
+                egui::pos2(left + i as f32 * (chip_w + chip_gap), card.top() + 150.0),
+                egui::vec2(chip_w, 34.0),
+            );
+            if bar_button(ui, &format!("draft-loader-{id}"), chip, crate::state::loader_title(id), *id == self.draft_loader) {
+                picked_loader = Some((*id).to_string());
+            }
+        }
+        if let Some(id) = picked_loader {
+            self.draft_loader = id;
+            self.refresh_draft_name();
+        }
+
+        ui.painter().text(egui::pos2(left, card.top() + 200.0), egui::Align2::LEFT_CENTER, "Version", sub_font(12.0), MUTED);
         let gap = 8.0;
-        let row_h = 36.0;
-        let grid = egui::Rect::from_min_size(egui::pos2(left, card.top() + 166.0), egui::vec2(width, row_h * 3.0 + gap * 2.0));
+        let row_h = 34.0;
+        let grid = egui::Rect::from_min_size(egui::pos2(left, card.top() + 214.0), egui::vec2(width, row_h * 3.0 + gap * 2.0));
         let versions = self.release_lines();
         let picked = self.draft_version.clone();
         let mut chosen: Option<String> = None;
@@ -356,7 +379,7 @@ impl super::super::Desktop {
             egui::ScrollArea::vertical()
                 .id_salt("popup-versions")
                 .auto_shrink([false, false])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(&mut grid_ui, |ui| {
                     ui.set_width(content_w);
                     ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
@@ -376,10 +399,11 @@ impl super::super::Desktop {
         }
         if let Some(id) = chosen {
             self.draft_version = id;
+            self.refresh_draft_name();
         }
 
-        paint_faded_rule(ui.painter(), left, card.top() + 308.0, width);
-        let btn_y = card.top() + 324.0;
+        paint_faded_rule(ui.painter(), left, card.top() + 360.0, width);
+        let btn_y = card.top() + 376.0;
         let create = egui::Rect::from_min_size(egui::pos2(right - 128.0, btn_y), egui::vec2(128.0, 40.0));
         let cancel = egui::Rect::from_min_size(egui::pos2(create.left() - 10.0 - 112.0, btn_y), egui::vec2(112.0, 40.0));
         if bar_button(ui, "popup-create", create, "Create", true) {
@@ -388,7 +412,8 @@ impl super::super::Desktop {
             } else {
                 self.draft_version.clone()
             });
-            let inst = crate::instances::create(&self.draft_name, &version, "vanilla");
+            let loader = if self.draft_loader.is_empty() { "vanilla".to_string() } else { self.draft_loader.clone() };
+            let inst = crate::instances::create(&self.draft_name, &version, &loader);
             let _ = std::fs::create_dir_all(crate::instances::path_of(&self.app, &inst));
             self.instance_id = inst.id.clone();
             self.selected = inst.version.clone();

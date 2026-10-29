@@ -71,6 +71,10 @@ fn default_loader() -> String {
     "vanilla".into()
 }
 
+pub fn default_jvm_args() -> String {
+    "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions".into()
+}
+
 pub fn loader_label(id: &str) -> &'static str {
     match id {
         "forge" => "FORGE",
@@ -79,6 +83,17 @@ pub fn loader_label(id: &str) -> &'static str {
         "neoforge" => "NEOFORGE",
         "optifine" => "OPTIFINE",
         _ => "VANILLA",
+    }
+}
+
+pub fn loader_title(id: &str) -> &'static str {
+    match id {
+        "forge" => "Forge",
+        "forge+optifine" => "Forge + OptiFine",
+        "fabric" => "Fabric",
+        "neoforge" => "NeoForge",
+        "optifine" => "OptiFine",
+        _ => "Vanilla",
     }
 }
 
@@ -107,7 +122,7 @@ impl Default for Settings {
             skin_model: "classic".into(),
             ram_mb: 4096,
             java_path: String::new(),
-            jvm_args: "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions".into(),
+            jvm_args: default_jvm_args(),
             game_dir: String::new(),
             width: 1280,
             height: 720,

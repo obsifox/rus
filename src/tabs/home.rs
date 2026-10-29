@@ -117,6 +117,7 @@ impl super::super::Desktop {
         if let Some(id) = self.paint_version_column(ui, list, &lines, nudge, "rail-one") {
             crate::sfx::select();
             self.select_version_art(&id);
+            self.tab = Tab::Home;
         }
 
         let gear = egui::Rect::from_center_size(egui::pos2(rail.center().x, full.bottom() - 22.0), egui::vec2(32.0, 32.0));
@@ -161,8 +162,14 @@ impl super::super::Desktop {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
         if hit.clicked() {
-            self.home_menu = !self.home_menu;
-            if self.home_menu { crate::sfx::open(); } else { crate::sfx::back(); }
+            if self.tab != Tab::Home {
+                self.tab = Tab::Home;
+                self.home_menu = true;
+                crate::sfx::open();
+            } else {
+                self.home_menu = !self.home_menu;
+                if self.home_menu { crate::sfx::open(); } else { crate::sfx::back(); }
+            }
         }
         hit.on_hover_text("Instance and Mods");
 
@@ -194,6 +201,7 @@ impl super::super::Desktop {
         }
         if let Some(id) = pick {
             self.select_instance(&id);
+            self.tab = Tab::Home;
         }
     }
 
@@ -291,7 +299,7 @@ impl super::super::Desktop {
             });
         }
         if make {
-            self.create_version_copy(&version);
+            self.open_instance_draft(&version);
         }
         if let Some(id) = pick {
             self.select_instance(&id);
@@ -322,6 +330,24 @@ impl super::super::Desktop {
             self.instance_id.clear();
         }
         self.save_settings();
+    }
+
+    pub(crate) fn open_instance_draft(&mut self, version: &str) {
+        let version = if version.trim().is_empty() { "26.3".to_string() } else { version.trim().to_string() };
+        self.draft_version = version;
+        self.draft_loader = "vanilla".into();
+        self.draft_name_touched = false;
+        self.refresh_draft_name();
+        self.draft_open = true;
+        crate::sfx::open();
+    }
+
+    pub(crate) fn refresh_draft_name(&mut self) {
+        if self.draft_name_touched {
+            return;
+        }
+        let loader = if self.draft_loader.is_empty() { "vanilla" } else { self.draft_loader.as_str() };
+        self.draft_name = format!("{} {}", crate::state::loader_title(loader), self.draft_version);
     }
 
     fn create_version_copy(&mut self, version: &str) {
@@ -787,41 +813,14 @@ impl super::super::Desktop {
 
 }
 
-/// Installed: a package with a downward arrow. Same weight as the globe beside it.
+/// Installed: Material download icon. Same weight as the globe beside it.
 pub(crate) fn paint_installed_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.6, color);
-    let box_r = egui::Rect::from_center_size(c + egui::vec2(0.0, s * 0.22), egui::vec2(s * 0.72, s * 0.46));
-    painter.rect_stroke(box_r, 1.5, stroke, egui::StrokeKind::Inside);
-    let lid_y = box_r.top() + s * 0.14;
-    painter.line_segment(
-        [egui::pos2(box_r.left() + 1.0, lid_y), egui::pos2(box_r.right() - 1.0, lid_y)],
-        stroke,
-    );
-    let tip = egui::pos2(c.x, box_r.top() - s * 0.06);
-    painter.line_segment([egui::pos2(c.x, tip.y - s * 0.26), tip], stroke);
-    painter.line_segment([tip + egui::vec2(-s * 0.13, -s * 0.12), tip], stroke);
-    painter.line_segment([tip + egui::vec2(s * 0.13, -s * 0.12), tip], stroke);
+    paint_material(painter, c, s.max(16.0), I_DOWNLOAD, color);
 }
 
-/// Explore: a globe, not a word.
+/// Explore: Material public icon, not a drawn globe.
 pub(crate) fn paint_globe_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.6, color);
-    let r = s * 0.40;
-    painter.circle_stroke(c, r, stroke);
-    painter.line_segment([c + egui::vec2(-r, 0.0), c + egui::vec2(r, 0.0)], stroke);
-    painter.line_segment([c + egui::vec2(0.0, -r), c + egui::vec2(0.0, r)], stroke);
-    let mut left = Vec::new();
-    let mut right = Vec::new();
-    for i in 0..=8 {
-        let t = i as f32 / 8.0;
-        let y = -r + t * 2.0 * r;
-        let k = (1.0 - (y / r).powi(2)).max(0.0).sqrt();
-        let x = r * 0.46 * k;
-        left.push(c + egui::vec2(-x, y));
-        right.push(c + egui::vec2(x, y));
-    }
-    painter.add(egui::Shape::line(left, stroke));
-    painter.add(egui::Shape::line(right, stroke));
+    paint_material(painter, c, s.max(16.0), I_GLOBE, color);
 }
 
 fn quiet_scroll(id: impl std::hash::Hash) -> egui::ScrollArea {

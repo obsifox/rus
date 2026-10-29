@@ -156,6 +156,26 @@ pub fn build_command_at(app: &App, id: &str, game_dir: &std::path::Path, server:
     // memory + user jvm args
     cmd.arg(format!("-Xmx{}M", settings.ram_mb.max(512)));
     cmd.arg(format!("-Xms{}M", (settings.ram_mb / 2).max(256)));
+    let skin_path = crate::skin::resolve_texture(app, &settings.skin);
+    let cape_path = crate::skin::resolve_texture(app, &settings.cape);
+    if skin_path.is_some() || cape_path.is_some() {
+        let agent = crate::skin::stage_agent(app);
+        let log = app.p("logs/rus-skin.log");
+        if let Some(parent) = log.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        cmd.arg(format!("-javaagent:{}", agent.display()));
+        cmd.arg(format!("-Drus.log={}", log.display()));
+        cmd.arg(format!("-Drus.uuid={uuid}"));
+        cmd.arg(format!("-Drus.name={}", settings.username));
+        cmd.arg(format!("-Drus.model={}", crate::skin::model_flag(app, &settings.skin, &settings.skin_model)));
+        if let Some(path) = &skin_path {
+            cmd.arg(format!("-Drus.skin={}", path.display()));
+        }
+        if let Some(path) = &cape_path {
+            cmd.arg(format!("-Drus.cape={}", path.display()));
+        }
+    }
     for a in settings.jvm_args.split_whitespace() {
         cmd.arg(a);
     }
@@ -342,11 +362,10 @@ pub fn launch_at(app: &App, id: &str, game_dir: &std::path::Path, server: Option
             }
         }
     }
-    // re-stage mods + skin pack so tweaks apply without reinstalling
-    let settings = app.settings();
+    // re-stage mods. Skin and cape go on through rus-skin.jar, not a resource pack.
     let gdir = game_dir.to_path_buf();
     let _ = crate::mods::stage_into(app, &gdir);
-    let _ = crate::skin::build_pack(app, &gdir, &settings.username, &settings.skin, &settings.cape);
+    crate::skin::retire_pack(&gdir);
 
     let (mut cmd, javaw) = build_command_at(app, id, &gdir, server)?;
     let log_path = app.p(&format!("logs/{id}.log"));

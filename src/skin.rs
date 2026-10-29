@@ -225,6 +225,8 @@ pub fn materialize_preset(app: &App, kind: &str, key: &str) -> Option<PathBuf> {
         ("skin", "steve") => (skins_dir(app), "preset_steve.png".to_string(), PRESET_STEVE.to_vec()),
         ("skin", "alex") => (skins_dir(app), "preset_alex.png".to_string(), PRESET_ALEX.to_vec()),
         ("cape", "rus") => (capes_dir(app), "preset_rus.png".to_string(), rus_cape_png()),
+        ("cape", "one") => (capes_dir(app), "preset_one.png".to_string(), include_bytes!("../assets/cape-one.png").to_vec()),
+        ("cape", "two") => (capes_dir(app), "preset_two.png".to_string(), include_bytes!("../assets/cape-two.png").to_vec()),
         ("cape", k) => {
             let rgb = CAPE_PRESETS.iter().find(|(n, _)| *n == k)?.1;
             (capes_dir(app), format!("preset_{k}.png"), cape_png(rgb))
@@ -260,7 +262,7 @@ pub fn resolve_texture(app: &App, id: &str) -> Option<PathBuf> {
         return None;
     }
     if let Some(key) = id.strip_prefix("preset:") {
-        let kind = if key == "rus" || CAPE_PRESETS.iter().any(|(n, _)| *n == key) {
+        let kind = if matches!(key, "rus" | "one" | "two") || CAPE_PRESETS.iter().any(|(n, _)| *n == key) {
             "cape"
         } else {
             "skin"
@@ -332,6 +334,60 @@ fn zip_pack(pack_dir: &Path, out: &Path) -> Result<(), String> {
     walk(pack_dir, pack_dir, &mut zw, opts).map_err(|e| e.to_string())?;
     zw.finish().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Drop the old zipped pack so the player does not have to enable it.
+pub fn retire_pack(game_dir: &Path) {
+    let name = pack_name();
+    let _ = fs::remove_file(game_dir.join("resourcepacks").join(name));
+    let path = game_dir.join("options.txt");
+    let Ok(text) = fs::read_to_string(&path) else { return };
+    let entry = format!("file/{name}");
+    let mut changed = false;
+    let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+    for line in lines.iter_mut() {
+        let Some(rest) = line.strip_prefix("resourcePacks:") else { continue };
+        let mut list: Vec<String> = serde_json::from_str(rest).unwrap_or_default();
+        let before = list.len();
+        list.retain(|x| x != &entry);
+        if list.len() != before {
+            *line = format!("resourcePacks:{}", serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()));
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = fs::write(&path, lines.join("\n") + "\n");
+    }
+}
+
+/// Extract the loader-independent skin agent. The launcher attaches it; the player does not.
+pub fn stage_agent(app: &App) -> PathBuf {
+    let path = app.p("cache/rus-skin.jar");
+    let bytes: &[u8] = include_bytes!("../assets/rus-skin.jar");
+    if fs::read(&path).ok().as_deref() != Some(bytes) {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, bytes);
+    }
+    path
+}
+
+/// classic or slim, from the saved choice or the skin file itself.
+pub fn model_flag(app: &App, skin_id: &str, skin_model: &str) -> String {
+    if skin_model == "slim" || skin_id == "preset:alex" {
+        return "slim".into();
+    }
+    if skin_model == "classic" || skin_id == "preset:steve" {
+        return "classic".into();
+    }
+    let Some(path) = resolve_texture(app, skin_id) else { return "classic".into() };
+    let Ok(bytes) = fs::read(path) else { return "classic".into() };
+    let Ok(img) = image::load_from_memory(&bytes) else { return "classic".into() };
+    match crate::skinmodel::prepare_skin(&img.to_rgba8()) {
+        Ok(prepared) if crate::skinmodel::detect_slim(&prepared) => "slim".into(),
+        _ => "classic".into(),
+    }
 }
 
 /// Build (and enable) the skin pack for an instance. Returns a human note.
@@ -432,6 +488,53 @@ pub fn save_texture(app: &App, kind: &str, name: &str, data_url: &str) -> Result
     };
     fs::write(dir.join(&file), bytes).map_err(|e| e.to_string())?;
     Ok(format!("file:{file}"))
+}
+
+/// Imported PNGs only. Preset files stay on the Steve / Alex / Rus buttons.
+pub fn imported_files(app: &App, kind: &str) -> Vec<(String, std::path::PathBuf)> {
+    let dir = if kind == "cape" { capes_dir(app) } else { skins_dir(app) };
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(&dir) else { return out };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()) else { continue };
+        if !name.to_ascii_lowercase().ends_with(".png") || name.starts_with("preset_") {
+            continue;
+        }
+        out.push((format!("file:{name}"), path));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+pub fn import_named(app: &App, kind: &str, bytes: &[u8], preferred: &str) -> Result<String, String> {
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| format!("Not a PNG: {e}"))?
+        .to_rgba8();
+    match kind {
+        "skin" => { crate::skinmodel::prepare_skin(&img)?; }
+        "cape" => { crate::skinmodel::prepare_cape(&img)?; }
+        _ => return Err("unknown texture".into()),
+    };
+    let dir = if kind == "cape" { capes_dir(app) } else { skins_dir(app) };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem: String = preferred
+        .trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .take(32)
+        .collect();
+    let stem = if stem.is_empty() || stem.starts_with("preset_") {
+        format!("import-{}", crate::state::now_ms())
+    } else {
+        stem
+    };
+    let mut name = format!("{stem}.png");
+    if dir.join(&name).exists() {
+        name = format!("{stem}-{}.png", crate::state::now_ms());
+    }
+    fs::write(dir.join(&name), bytes).map_err(|e| e.to_string())?;
+    Ok(format!("file:{name}"))
 }
 
 pub fn import_texture(app: &App, kind: &str, bytes: &[u8]) -> Result<String, String> {

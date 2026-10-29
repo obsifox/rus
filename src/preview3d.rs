@@ -42,6 +42,49 @@ impl SkinPreview {
         self.dirty = true;
     }
 
+    /// Still portrait for Settings. No view buttons.
+    pub fn portrait(&mut self, ui: &mut egui::Ui, skin: &RgbaImage, cape: Option<&RgbaImage>, detected_slim: bool, size: egui::Vec2) {
+        let slim = match self.arms {
+            ArmModel::Classic => false,
+            ArmModel::Slim => true,
+            ArmModel::Auto => detected_slim,
+        };
+        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+        paint_preview_template(ui.painter(), rect);
+        if self.dirty || self.texture.is_none() {
+            let ppp = ui.ctx().pixels_per_point().clamp(1.0, 2.0);
+            let frame = raster::render(
+                skin,
+                cape,
+                &View {
+                    yaw: 0.85,
+                    pitch: 0.12,
+                    zoom: 1.05,
+                    walk: 0.0,
+                    slim,
+                    cape: cape.is_some(),
+                    overlay: false,
+                    width: (size.x * ppp) as u32,
+                    height: (size.y * ppp) as u32,
+                },
+            );
+            let color = egui::ColorImage::from_rgba_unmultiplied(
+                [frame.width() as usize, frame.height() as usize],
+                frame.as_raw(),
+            );
+            self.texture = Some(ui.ctx().load_texture("skin-preview", color, egui::TextureOptions::NEAREST));
+            self.dirty = false;
+        }
+        if let Some(tex) = &self.texture {
+            ui.painter().image(
+                tex.id(),
+                rect,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
     pub fn reset_view(&mut self) {
         self.yaw = 0.35;
         self.pitch = 0.18;
@@ -55,10 +98,14 @@ impl SkinPreview {
             ArmModel::Slim => true,
             ArmModel::Auto => detected_slim,
         };
+        let outer = ui.available_width().clamp(148.0, 220.0);
         ui.vertical(|ui| {
-            ui.set_width(148.0);
-            ui.set_max_width(148.0);
-            let size = egui::vec2(148.0, 132.0);
+            ui.set_width(outer);
+            ui.set_max_width(outer);
+            let size = egui::vec2(148.0, 188.0);
+            let image_pad = ((outer - size.x) * 0.5).max(0.0);
+            ui.horizontal(|ui| {
+                ui.add_space(image_pad);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
             paint_preview_template(ui.painter(), rect);
             let anim = self.auto_rotate || self.walk;
@@ -146,30 +193,53 @@ impl SkinPreview {
                     egui::Color32::WHITE,
                 );
             }
+            });
             ui.add_space(4.0);
+            let btn_w = ((outer - 12.0) / 3.0).clamp(40.0, 52.0);
+            let views = [("Front", 0.0f32), ("Back", std::f32::consts::PI), ("Side", std::f32::consts::FRAC_PI_2)];
             ui.horizontal(|ui| {
-                if view_button(ui, "Front") { self.yaw = 0.0; self.pitch = 0.12; self.dirty = true; }
-                gold_tick(ui);
-                if view_button(ui, "Back") { self.yaw = std::f32::consts::PI; self.pitch = 0.12; self.dirty = true; }
-                gold_tick(ui);
-                if view_button(ui, "Side") { self.yaw = std::f32::consts::FRAC_PI_2; self.pitch = 0.12; self.dirty = true; }
+                let row_w = btn_w * 3.0 + 12.0;
+                ui.add_space(((outer - row_w) * 0.5).max(0.0));
+                for (i, (label, yaw)) in views.into_iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(6.0);
+                    }
+                    if text_hit(ui, label, false, btn_w) {
+                        self.yaw = yaw;
+                        self.pitch = 0.12;
+                        self.dirty = true;
+                    }
+                }
             });
             ui.add_space(2.0);
-            toggle(ui, &mut self.show_cape, "Cape", &mut self.dirty);
-            toggle(ui, &mut self.auto_rotate, "Auto-rotate", &mut self.dirty);
-            toggle(ui, &mut self.walk, "Walk", &mut self.dirty);
+            let mut toggled = false;
+            for (slot, label) in [(0, "Cape"), (1, "Auto-rotate"), (2, "Walk")] {
+                let font = egui::FontId::proportional(12.0);
+                let text_w = ui.painter().layout_no_wrap(label.to_string(), font, egui::Color32::WHITE).size().x;
+                let w = (text_w + 16.0).min(outer);
+                let value = match slot {
+                    0 => &mut self.show_cape,
+                    1 => &mut self.auto_rotate,
+                    _ => &mut self.walk,
+                };
+                ui.horizontal(|ui| {
+                    ui.add_space(((outer - w) * 0.5).max(0.0));
+                    toggle(ui, value, label, &mut toggled);
+                });
+            }
+            if toggled {
+                self.dirty = true;
+            }
             ui.add_space(4.0);
+            let models = [(ArmModel::Auto, "Auto"), (ArmModel::Classic, "Classic"), (ArmModel::Slim, "Slim")];
             ui.horizontal(|ui| {
-                for (i, (model, label)) in [
-                    (ArmModel::Auto, "Auto"),
-                    (ArmModel::Classic, "Classic"),
-                    (ArmModel::Slim, "Slim"),
-                ].into_iter().enumerate() {
+                let row_w = btn_w * 3.0 + 12.0;
+                ui.add_space(((outer - row_w) * 0.5).max(0.0));
+                for (i, (model, label)) in models.into_iter().enumerate() {
                     if i > 0 {
-                        gold_tick(ui);
+                        ui.add_space(6.0);
                     }
-                    let on = self.arms == model;
-                    if model_button(ui, label, on) {
+                    if text_hit(ui, label, self.arms == model, btn_w) {
                         self.arms = model;
                         self.dirty = true;
                     }
@@ -179,16 +249,8 @@ impl SkinPreview {
     }
 }
 
-fn view_button(ui: &mut egui::Ui, label: &str) -> bool {
-    text_hit(ui, label, false)
-}
-
-fn model_button(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    text_hit(ui, label, on)
-}
-
-fn text_hit(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(52.0, 24.0), egui::Sense::click());
+fn text_hit(ui: &mut egui::Ui, label: &str, on: bool, width: f32) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 24.0), egui::Sense::click());
     paint_preview_template(ui.painter(), rect);
     let ink = if on {
         egui::Color32::from_rgb(0xF4, 0xCA, 0x54)
