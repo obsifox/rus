@@ -159,6 +159,76 @@ fn version_is(id: &str, prefix: &str) -> bool {
         || id.starts_with(&format!("{prefix}-"))
 }
 
+/// One square per version line. `label` is what the rail shows (`1.16`).
+/// `download` is the newest release of that line (`1.16.5`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReleaseLine {
+    pub label: String,
+    pub download: String,
+}
+
+pub fn representatives(ids: &[String]) -> Vec<ReleaseLine> {
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    for id in ids {
+        let key = family_key(id);
+        if seen.iter().any(|k| k == &key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(ReleaseLine {
+            label: line_label(id),
+            download: id.clone(),
+        });
+    }
+    out
+}
+
+/// Newest release of the line `id` belongs to. `1.16` and `1.16.2` both become `1.16.5`.
+pub fn download_for(ids: &[String], id: &str) -> String {
+    if id.is_empty() {
+        return String::new();
+    }
+    let lines = representatives(ids);
+    if let Some(line) = lines.iter().find(|line| line.download == id || line.label == id) {
+        return line.download.clone();
+    }
+    if !id.contains('-') {
+        let key = family_key(id);
+        if let Some(line) = lines.iter().find(|line| family_key(&line.download) == key) {
+            return line.download.clone();
+        }
+    }
+    id.to_string()
+}
+
+fn family_key(id: &str) -> String {
+    let paper = for_version(id);
+    if !paper.prefixes.is_empty() {
+        return format!("paper:{}", paper.title);
+    }
+    format!("line:{}", numeric_line(id))
+}
+
+fn line_label(id: &str) -> String {
+    let paper = for_version(id);
+    if let Some(prefix) = paper.prefixes.first() {
+        return (*prefix).to_string();
+    }
+    numeric_line(id)
+}
+
+/// `1.16.5` → `1.16`, `26.1.2` → `26.1`, `1.8.9` → `1.8`.
+fn numeric_line(id: &str) -> String {
+    let head = id.split('-').next().unwrap_or(id);
+    let parts: Vec<&str> = head.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.len() >= 2 && parts.iter().all(|part| part.chars().all(|c| c.is_ascii_digit())) {
+        format!("{}.{}", parts[0], parts[1])
+    } else {
+        id.to_string()
+    }
+}
+
 /// Square art for the rail. Only versions whose desktop wallpaper crops to an empty field.
 pub fn square(title: &str) -> Option<&'static [u8]> {
     match title {
@@ -341,6 +411,28 @@ fn desktop_score(name: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_line_downloads_its_newest_release() {
+        let ids = ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.9", "1.21.1", "1.21", "1.16.5", "1.16.4", "1.16.1", "1.16", "1.8.9", "1.8", "1.7.10", "1.7.2"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let lines = representatives(&ids);
+        let one = |label: &str| lines.iter().find(|line| line.label == label).unwrap_or_else(|| panic!("missing {label}"));
+        assert_eq!(one("1.16").download, "1.16.5");
+        assert_eq!(lines.iter().filter(|line| line.label == "1.16").count(), 1);
+        assert_eq!(one("26.1").download, "26.1.2");
+        assert_eq!(one("1.21").download, "1.21.1");
+        assert_eq!(one("1.21.9").download, "1.21.10");
+        assert_eq!(one("1.21.11").download, "1.21.11");
+        assert_eq!(one("1.8").download, "1.8.9");
+        assert_eq!(one("1.7").download, "1.7.10");
+        assert_eq!(download_for(&ids, "1.16"), "1.16.5");
+        assert_eq!(download_for(&ids, "1.16.2"), "1.16.5");
+        assert_eq!(download_for(&ids, "26.1.1"), "26.1.2");
+        assert_eq!(download_for(&ids, "26.3"), "26.3");
+    }
 
     #[test]
     fn every_collection_is_bundled() {

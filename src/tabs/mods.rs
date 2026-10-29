@@ -527,14 +527,14 @@ impl super::super::Desktop {
     }
 
     fn explore_versions(&self) -> Vec<String> {
-        let mut out = Vec::new();
+        let mut out: Vec<String> = self.release_lines().into_iter().map(|line| line.download).collect();
         for v in &self.versions {
-            if v.channel == "release" || (self.snapshots && v.channel == "snapshot") || (self.previews && v.channel == "preview") {
+            if (self.snapshots && v.channel == "snapshot") || (self.previews && v.channel == "preview") {
                 out.push(v.id.clone());
             }
         }
         if out.is_empty() {
-            out.push(if self.selected.is_empty() { "26.3".into() } else { self.selected.clone() });
+            out.push(if self.selected.is_empty() { "26.3".into() } else { self.download_of(&self.selected) });
         }
         out
     }

@@ -394,6 +394,15 @@ impl Desktop {
                     self.versions_note = format!("{} versions", rows.len());
                     self.version_latest = latest;
                     self.versions = rows;
+                    let resolved = self.download_of(&self.selected);
+                    if !resolved.is_empty() && resolved != self.selected {
+                        self.selected = resolved.clone();
+                        if let Some(inst) = self.instances.iter_mut().find(|i| i.id == self.instance_id) {
+                            inst.version = resolved;
+                        }
+                        crate::instances::save(&self.app, &self.instances);
+                        self.save_settings();
+                    }
                     self.ensure_fabric();
                 }
                 Msg::VersionsErr(e) => self.versions_note = e,
@@ -545,6 +554,31 @@ impl Desktop {
     }
 
     fn paper_for(&self, id: &str) -> &'static Paper { wallpapers::for_version(id) }
+
+    fn release_ids(&self) -> Vec<String> {
+        self.versions.iter().filter(|v| v.channel == "release").map(|v| v.id.clone()).collect()
+    }
+
+    /// One entry per version line. The label is the line (`1.16`); the download is its newest release (`1.16.5`).
+    pub(crate) fn release_lines(&self) -> Vec<wallpapers::ReleaseLine> {
+        let ids = self.release_ids();
+        if ids.is_empty() {
+            return wallpapers::all()
+                .iter()
+                .filter_map(|paper| paper.prefixes.first().copied())
+                .map(|label| wallpapers::ReleaseLine { label: label.to_string(), download: label.to_string() })
+                .collect();
+        }
+        wallpapers::representatives(&ids)
+    }
+
+    pub(crate) fn download_of(&self, id: &str) -> String {
+        let ids = self.release_ids();
+        if ids.is_empty() {
+            return id.to_string();
+        }
+        wallpapers::download_for(&ids, id)
+    }
 
     fn settle_playtime(&mut self) {
         let finished = crate::play::drain_finished();
@@ -839,7 +873,10 @@ impl Desktop {
     }
 
     fn start_install(&mut self) {
-        let version = self.selected.clone();
+        let version = self.download_of(&self.selected);
+        if !version.is_empty() {
+            self.selected = version.clone();
+        }
         if version.is_empty() {
             self.notice = "Select a version".into();
             return;

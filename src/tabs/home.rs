@@ -103,18 +103,18 @@ impl super::super::Desktop {
             }
         }
         let list = egui::Rect::from_min_max(egui::pos2(rail.left() + 4.0, 88.0), egui::pos2(rail.right() - 4.0, full.bottom() - 46.0));
-        let versions = self.rail_versions();
-        let ids: Vec<String> = if self.rail_view == 0 {
-            versions.into_iter().filter(|id| self.app.is_installed(id)).collect()
+        let versions = self.rail_lines();
+        let lines: Vec<crate::wallpapers::ReleaseLine> = if self.rail_view == 0 {
+            versions.into_iter().filter(|line| self.app.is_installed(&line.download)).collect()
         } else {
             versions
         };
         let nudge = self.rail_nudge;
         self.rail_nudge = 0.0;
-        if ids.is_empty() {
+        if lines.is_empty() {
             ui.painter().text(list.center(), egui::Align2::CENTER_CENTER, "None yet", sub_font(10.0), HY_MUTED);
         }
-        if let Some(id) = self.paint_version_column(ui, list, &ids, nudge, "rail-one") {
+        if let Some(id) = self.paint_version_column(ui, list, &lines, nudge, "rail-one") {
             crate::sfx::select();
             self.select_version_art(&id);
         }
@@ -300,21 +300,12 @@ impl super::super::Desktop {
         }
     }
 
-    fn rail_versions(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.versions.iter().filter(|v| v.channel == "release").map(|v| v.id.clone()).collect();
-        if ids.is_empty() {
-            for paper in crate::wallpapers::all() {
-                if let Some(prefix) = paper.prefixes.first() {
-                    if !ids.iter().any(|id| id == prefix) {
-                        ids.push((*prefix).to_string());
-                    }
-                }
-            }
+    fn rail_lines(&self) -> Vec<crate::wallpapers::ReleaseLine> {
+        let lines = self.release_lines();
+        if lines.is_empty() {
+            return vec![crate::wallpapers::ReleaseLine { label: "26.3".into(), download: "26.3".into() }];
         }
-        if ids.is_empty() {
-            ids.push("26.3".into());
-        }
-        ids
+        lines
     }
 
     fn select_version_art(&mut self, version: &str) {
@@ -351,8 +342,9 @@ impl super::super::Desktop {
         }
     }
 
-    fn paint_version_column(&mut self, ui: &mut egui::Ui, rect: egui::Rect, ids: &[String], nudge: f32, salt: &str) -> Option<String> {
+    fn paint_version_column(&mut self, ui: &mut egui::Ui, rect: egui::Rect, lines: &[crate::wallpapers::ReleaseLine], nudge: f32, salt: &str) -> Option<String> {
         let mut pick = None;
+        let active = if self.selected.is_empty() { "26.3".to_string() } else { self.download_of(&self.selected) };
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         child.set_clip_rect(rect);
         quiet_scroll(salt).show(&mut child, |ui| {
@@ -360,14 +352,14 @@ impl super::super::Desktop {
             if nudge != 0.0 {
                 ui.scroll_with_delta(egui::vec2(0.0, nudge));
             }
-            for id in ids {
+            for line in lines {
                 let (slot, _) = ui.allocate_exact_size(egui::vec2(rect.width(), 68.0), Sense::hover());
-                let hit = ui.interact(slot, egui::Id::new(salt).with(id), Sense::click());
+                let hit = ui.interact(slot, egui::Id::new(salt).with(&line.download), Sense::click());
                 let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.14);
                 let side = 44.0 + hot * 3.0;
                 let square = egui::Rect::from_center_size(egui::pos2(slot.center().x, slot.top() + 24.0), egui::vec2(side, side));
-                let on = self.selected == *id || (self.selected.is_empty() && id == "26.3");
-                let paper = self.paper_for(id);
+                let on = active == line.download || self.selected == line.label;
+                let paper = self.paper_for(&line.download);
                 let sq_key = format!("{}#sq", paper.title);
                 if let Some(tex) = self.papers.get(&sq_key).or_else(|| self.papers.get(paper.title)) {
                     let uv = if self.papers.contains_key(&sq_key) {
@@ -382,18 +374,18 @@ impl super::super::Desktop {
                 } else {
                     ui.painter().rect_filled(square, 4.0, egui::Color32::from_rgb(28, 28, 32));
                 }
-                let cover = ui.ctx().animate_value_with_time(egui::Id::new("sq-veil").with(id), self.version_cover(id), 0.22);
+                let cover = ui.ctx().animate_value_with_time(egui::Id::new("sq-veil").with(&line.download), self.version_cover(&line.download), 0.22);
                 if cover > 0.02 {
                     let veil = egui::Rect::from_min_size(square.left_top(), egui::vec2(square.width(), square.height() * cover));
                     ui.painter().rect_filled(veil, 4.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128));
                 }
                 let edge = if on { GOLD } else { egui::Color32::from_white_alpha(40 + (hot * 40.0) as u8) };
                 ui.painter().rect_stroke(square, 4.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, edge), egui::StrokeKind::Inside);
-                let label = ellipsize(ui.painter(), id, sub_font(9.0), rect.width() - 4.0);
+                let shown = ellipsize(ui.painter(), &line.label, sub_font(9.0), rect.width() - 4.0);
                 ui.painter().text(
                     egui::pos2(slot.center().x, slot.bottom() - 7.0),
                     egui::Align2::CENTER_CENTER,
-                    &label,
+                    &shown,
                     sub_font(9.0),
                     if on { egui::Color32::WHITE } else { HY_MUTED },
                 );
@@ -401,9 +393,15 @@ impl super::super::Desktop {
                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                 }
                 if hit.clicked() {
-                    pick = Some(id.clone());
+                    pick = Some(line.download.clone());
                 }
-                let tip = if self.app.is_installed(id) { id.clone() } else { format!("{id} · not installed") };
+                let tip = if line.label == line.download {
+                    if self.app.is_installed(&line.download) { line.download.clone() } else { format!("{} · not installed", line.download) }
+                } else if self.app.is_installed(&line.download) {
+                    format!("{} · {}", line.label, line.download)
+                } else {
+                    format!("{} · downloads {}", line.label, line.download)
+                };
                 hit.on_hover_text(tip);
             }
         });

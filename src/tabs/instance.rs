@@ -235,11 +235,11 @@ impl super::super::Desktop {
         if pill_action(ui, new_btn, "New", true) {
             self.draft_name.clear();
             let release = self.versions.iter().find(|v| v.channel == "release").map(|v| v.id.clone());
-            self.draft_version = if self.versions.iter().any(|v| v.id == self.selected && v.channel == "release") {
-                self.selected.clone()
+            self.draft_version = self.download_of(if self.versions.iter().any(|v| v.id == self.selected && v.channel == "release") {
+                &self.selected
             } else {
-                release.unwrap_or_else(|| "26.3".into())
-            };
+                release.as_deref().unwrap_or("26.3")
+            });
             self.draft_open = true;
         }
 
@@ -342,7 +342,7 @@ impl super::super::Desktop {
         let gap = 8.0;
         let row_h = 36.0;
         let grid = egui::Rect::from_min_size(egui::pos2(left, card.top() + 166.0), egui::vec2(width, row_h * 3.0 + gap * 2.0));
-        let versions: Vec<String> = self.versions.iter().filter(|v| v.channel == "release").map(|v| v.id.clone()).collect();
+        let versions = self.release_lines();
         let picked = self.draft_version.clone();
         let mut chosen: Option<String> = None;
         if versions.is_empty() {
@@ -364,9 +364,10 @@ impl super::super::Desktop {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = gap;
                             ui.set_height(row_h);
-                            for id in chunk {
-                                if button(ui, id, vw, row_h, id == &picked) {
-                                    chosen = Some(id.clone());
+                            for line in chunk {
+                                let on = line.download == picked || line.label == picked;
+                                if button(ui, &line.label, vw, row_h, on) {
+                                    chosen = Some(line.download.clone());
                                 }
                             }
                         });
@@ -382,11 +383,11 @@ impl super::super::Desktop {
         let create = egui::Rect::from_min_size(egui::pos2(right - 128.0, btn_y), egui::vec2(128.0, 40.0));
         let cancel = egui::Rect::from_min_size(egui::pos2(create.left() - 10.0 - 112.0, btn_y), egui::vec2(112.0, 40.0));
         if bar_button(ui, "popup-create", create, "Create", true) {
-            let version = if self.draft_version.is_empty() {
-                versions.first().cloned().unwrap_or_else(|| "26.3".into())
+            let version = self.download_of(&if self.draft_version.is_empty() {
+                versions.first().map(|line| line.download.clone()).unwrap_or_else(|| "26.3".into())
             } else {
                 self.draft_version.clone()
-            };
+            });
             let inst = crate::instances::create(&self.draft_name, &version, "vanilla");
             let _ = std::fs::create_dir_all(crate::instances::path_of(&self.app, &inst));
             self.instance_id = inst.id.clone();
