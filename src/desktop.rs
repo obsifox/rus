@@ -1095,13 +1095,13 @@ impl Desktop {
             self.tour_start = now;
         }
         let age = now - self.tour_start;
-        self.tab = if age < 2.0 {
+        self.tab = if age < 3.2 {
             Tab::Home
-        } else if age < 6.8 {
+        } else if age < 7.0 {
             Tab::Versions
-        } else if age < 9.4 {
+        } else if age < 10.6 {
             Tab::Mods
-        } else if age < 12.4 {
+        } else if age < 14.2 {
             Tab::Settings
         } else {
             Tab::Home
@@ -1130,12 +1130,11 @@ impl Desktop {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
             }
         }
+        self.paint_home_rail(ui, full);
         if self.tab == Tab::Home {
-            self.paint_home_rail(ui, full);
             self.paint_version_bar(ui, full);
         } else {
-            let player = self.paint_player_bar(ui, full);
-            self.paint_shared_tabs(ui, full, player.right() + 10.0);
+            self.paint_page_icons(ui);
         }
         if self.tab != Tab::Home || !self.home_menu {
             self.paint_title_logo(ui, full);
@@ -2847,11 +2846,11 @@ fn icon_label(ui: &mut egui::Ui, icon: char, size: f32, color: egui::Color32) {
 }
 
 fn panel_fill(alpha: u8) -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(0x08, 0x14, 0x2C, alpha)
+    egui::Color32::from_rgba_unmultiplied(8, 10, 14, alpha)
 }
 
 fn glow_edge() -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(0x6E, 0xB8, 0xFF, 220)
+    egui::Color32::from_white_alpha(42)
 }
 
 fn paint_neon_plate(painter: &egui::Painter, rect: egui::Rect, radius: f32, fill: egui::Color32, edge: egui::Color32) {
@@ -3131,7 +3130,7 @@ fn pill_action(ui: &mut egui::Ui, rect: egui::Rect, label: &str, primary: bool) 
 
 /// Same two install colors, blended top to bottom instead of a hard split.
 fn spec_content(full: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_max(egui::pos2(16.0, 70.0), egui::pos2(full.right() - 16.0, full.bottom() - 14.0))
+    egui::Rect::from_min_max(egui::pos2(HOME_RAIL + 10.0, 102.0), egui::pos2(full.right() - 16.0, full.bottom() - 14.0))
 }
 
 fn paint_main_box(painter: &egui::Painter, rect: egui::Rect) {

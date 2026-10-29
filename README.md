@@ -33,21 +33,26 @@
 <br>
 
 <p align="center">
-  <img src="docs/home.png" alt="Rus home: collection wallpaper, gold navigation, and Play on the art" width="100%">
-  <br><sub><b>Home.</b> The selected version’s official wallpaper fills the window. Play sits on the art.</sub>
+  <img src="docs/home.png" alt="Rus home: black version rail, collection wallpaper, and Play on the art" width="100%">
+  <br><sub><b>Home.</b> One rail for every page. The selected version’s wallpaper fills the window. Play sits on the art.</sub>
 </p>
 
 ## A tour
 
-These pictures are the Rus window itself, captured from the native program (`rus --shot`).
+The same window, in motion. These pictures are captured from the native program (`rus --shot`).
+
+<p align="center">
+  <a href="https://github.com/obsifox/rus/releases/download/1.26.3.13/rus-tour.mp4"><img src="docs/tour.gif" alt="Rus tour: Home, Instance, Mods, and Settings on the shared rail" width="100%"></a>
+  <br><sub><a href="https://github.com/obsifox/rus/releases/download/1.26.3.13/rus-tour.mp4"><b>Watch the tour</b></a></sub>
+</p>
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/versions.png" alt="Instance tab with isolated copies and the loader panel" width="100%"><p align="center"><sub><b>Instance.</b> Several isolated copies of one version. New is an overlay, not a separate window.</sub></p></td>
-<td width="50%" valign="top"><img src="docs/settings.png" alt="Settings tab with username, memory, window size, snapshot toggle, Steve skin and the Rus cape" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, and a 3D skin preview. No Microsoft login.</sub></p></td>
+<td width="50%" valign="top"><img src="docs/versions.png" alt="Instance page on the shared rail, with copies and the loader panel" width="100%"><p align="center"><sub><b>Instance.</b> The same rail. Isolated copies, and the loader beside them.</sub></p></td>
+<td width="50%" valign="top"><img src="docs/settings.png" alt="Settings page on the shared rail, with username, memory, and the skin preview" width="100%"><p align="center"><sub><b>Settings.</b> Local username, memory, window, and a 3D skin preview. No Microsoft login.</sub></p></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/mods.png" alt="Mod tab in Explore, listing Fabric mods for 26.3 from Modrinth" width="100%"><p align="center"><sub><b>Mods.</b> Installed files, or Explore on Modrinth. A project opens with its picture, description, and dependencies.</sub></p></td>
+<td colspan="2"><img src="docs/mods.png" alt="Mods page on the shared rail, exploring Fabric mods for 26.3" width="100%"><p align="center"><sub><b>Mods.</b> Installed and Explore are icons. A project opens with its picture, description, and dependencies.</sub></p></td>
 </tr>
 </table>
 
@@ -127,7 +132,7 @@ The release is Rus Gate. Download it once.
 
 | Platform | File |
 | --- | --- |
-| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.12/rus-gate.exe) |
+| Windows | [rus-gate.exe](https://github.com/obsifox/rus/releases/download/1.26.3.13/rus-gate.exe) |
 
 <p align="center">
   <img src="docs/gate.png" alt="Rus Gate, showing the install folder on the blue poster" width="280">
@@ -138,7 +143,7 @@ Run `rus-gate.exe`. The window is vertical, with no title bar. First run shows t
 
 `Rus Launcher.exe` does not show the install step. With a connection it reads **tags**, not the release list, downloads `rus_{version}.exe` from that tag's release, and starts it. With no connection it starts the installed build.
 
-Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.12`.
+Versions are `{version}.{year}.{month}.{patch}`, starting at `1.26.3.00`. An update changes the last two digits. Current tag: `1.26.3.13`.
 
 Linux builds from source with `cargo build --release`. The published release is the Windows gate.
 

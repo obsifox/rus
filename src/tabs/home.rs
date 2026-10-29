@@ -94,7 +94,7 @@ impl super::super::Desktop {
             hit.on_hover_text(if kind == 0 { "Installed" } else { "Explore" });
         }
         let typing = ui.memory(|m| m.focused().is_some());
-        if !typing {
+        if self.tab == Tab::Home && !typing {
             if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                 self.rail_nudge += 68.0;
             }
@@ -121,7 +121,11 @@ impl super::super::Desktop {
 
         let gear = egui::Rect::from_center_size(egui::pos2(rail.center().x, full.bottom() - 22.0), egui::vec2(32.0, 32.0));
         let settings = ui.interact(gear, egui::Id::new("rail-settings"), Sense::click());
-        let gear_ink = if settings.hovered() { GOLD } else { egui::Color32::from_rgb(210, 214, 220) };
+        let gear_on = self.tab == Tab::Settings;
+        let gear_ink = if settings.hovered() || gear_on { GOLD } else { egui::Color32::from_rgb(210, 214, 220) };
+        if gear_on {
+            ui.painter().rect_stroke(gear, 8.0, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
+        }
         paint_tab_glyph(ui.painter(), Tab::Settings, gear.center(), 15.0, gear_ink);
         if settings.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -784,7 +788,7 @@ impl super::super::Desktop {
 }
 
 /// Installed: a package with a downward arrow. Same weight as the globe beside it.
-fn paint_installed_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+pub(crate) fn paint_installed_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
     let stroke = egui::Stroke::new(1.6, color);
     let box_r = egui::Rect::from_center_size(c + egui::vec2(0.0, s * 0.22), egui::vec2(s * 0.72, s * 0.46));
     painter.rect_stroke(box_r, 1.5, stroke, egui::StrokeKind::Inside);
@@ -800,7 +804,7 @@ fn paint_installed_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: e
 }
 
 /// Explore: a globe, not a word.
-fn paint_globe_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
+pub(crate) fn paint_globe_icon(painter: &egui::Painter, c: egui::Pos2, s: f32, color: egui::Color32) {
     let stroke = egui::Stroke::new(1.6, color);
     let r = s * 0.40;
     painter.circle_stroke(c, r, stroke);

@@ -4,7 +4,7 @@ use super::super::*;
 
 impl super::super::Desktop {
     pub(crate) fn page_in_panel(&mut self, ui: &mut egui::Ui, full: egui::Rect, page: Page) {
-        let panel = drect(full, 26.0, 96.0, 1228.0, 608.0);
+        let panel = spec_content(full);
         paint_glass_panel(ui.painter(), panel, 12.0);
         let inner = panel.shrink(us(full, 14.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
@@ -13,6 +13,39 @@ impl super::super::Desktop {
         match page {
             Page::Mods => self.page_mods(&mut child),
             Page::Settings => self.page_settings(&mut child),
+        }
+    }
+
+    /// Same icon buttons as the rail, so every page can move without the old word bar.
+    pub(crate) fn paint_page_icons(&mut self, ui: &mut egui::Ui) {
+        let tabs = [Tab::Home, Tab::Versions, Tab::Mods, Tab::Settings];
+        let size = 32.0;
+        let gap = 6.0;
+        let x0 = HOME_RAIL + 10.0;
+        let y0 = 12.0;
+        for (i, tab) in tabs.into_iter().enumerate() {
+            let rect = egui::Rect::from_min_size(egui::pos2(x0 + i as f32 * (size + gap), y0), egui::vec2(size, size));
+            let on = self.tab == tab;
+            let hit = ui.interact(rect, egui::Id::new("page-icon").with(tab.label()), Sense::click());
+            let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered() || on, 0.14);
+            let fill = if on {
+                egui::Color32::from_rgba_unmultiplied(0x2C, 0x24, 0x12, 190 + (hot * 40.0) as u8)
+            } else {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (16.0 + hot * 28.0) as u8)
+            };
+            ui.painter().rect_filled(rect, 8.0, fill);
+            if on {
+                ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, GOLD), egui::StrokeKind::Inside);
+            }
+            paint_tab_glyph(ui.painter(), tab, rect.center(), 15.0, if on { GOLD } else { HY_TEXT });
+            if hit.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if hit.clicked() && self.tab != tab {
+                self.tab = tab;
+                crate::sfx::toggle();
+            }
+            hit.on_hover_text(tab.label());
         }
     }
 

@@ -133,11 +133,11 @@ impl super::super::Desktop {
                         }
                     });
                     ui.add_space(4.0);
-                    if check(ui, &mut self.snapshots, "Show snapshots (series 26 and up)") {
+                    if check(ui, &mut self.snapshots, "Snapshots") {
                         self.save_settings();
                         spawn_versions(self.app.clone(), self.tx.clone());
                     }
-                    if check(ui, &mut self.previews, "Show previews (series 26 and up)") {
+                    if check(ui, &mut self.previews, "Previews") {
                         self.save_settings();
                         spawn_versions(self.app.clone(), self.tx.clone());
                     }

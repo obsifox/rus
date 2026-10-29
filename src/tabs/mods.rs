@@ -13,28 +13,40 @@ impl super::super::Desktop {
         let inner = content.shrink(14.0);
         let mode_y = inner.top();
         let mut x = inner.left() + 4.0;
-        for (i, label) in ["Installed", "Explore"].iter().enumerate() {
+        for i in 0..2 {
             let on = self.mod_view as usize == i;
-            let w = if on { chip_w(ui, label) + 8.0 } else { chip_w(ui, label) };
-            let rect = egui::Rect::from_min_size(egui::pos2(x, mode_y), egui::vec2(w, 30.0));
+            let rect = egui::Rect::from_min_size(egui::pos2(x, mode_y), egui::vec2(32.0, 30.0));
             let hit = ui.interact(rect, egui::Id::new("mod-view").with(i), Sense::click());
+            let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered() || on, 0.14);
+            let fill = if on {
+                egui::Color32::from_rgba_unmultiplied(0x2C, 0x24, 0x12, 190 + (hot * 40.0) as u8)
+            } else {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (16.0 + hot * 24.0) as u8)
+            };
+            ui.painter().rect_filled(rect, 8.0, fill);
             if on {
-                ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(0x2C, 0x24, 0x12));
                 ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, HY_ACCENT), egui::StrokeKind::Inside);
             }
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, *label, nav_font(13.0), if on { HY_ACCENT } else { HY_TEXT });
+            let ink = if on { HY_ACCENT } else { HY_TEXT };
+            if i == 0 {
+                super::home::paint_installed_icon(ui.painter(), rect.center(), 14.0, ink);
+            } else {
+                super::home::paint_globe_icon(ui.painter(), rect.center(), 14.0, ink);
+            }
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
-            if hit.clicked() {
+            if hit.clicked() && self.mod_view as usize != i {
                 self.mod_view = i as u8;
                 self.explore_ver_open = false;
                 self.explore_open = None;
+                crate::sfx::toggle();
                 if i == 1 {
                     self.explore_dirty = true;
                 }
             }
-            x += w + 6.0;
+            hit.on_hover_text(if i == 0 { "Installed" } else { "Explore" });
+            x += 32.0 + 6.0;
         }
 
         let cats = [("Modpack", I_LAYERS), ("Mods", '\u{E87B}'), ("Resource packs", I_FOLDER), ("Shader packs", I_FLARE)];
