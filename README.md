@@ -69,7 +69,7 @@ The same window, in motion. These pictures are captured from the native program 
 
 | Area | What you get |
 |---|---|
-| **Window** | Home, Instance, Mod, Settings, over the collection wallpaper. English. Titles and tabs use Lexend; body and captions use Nunito Sans, the faces from hytale.com. Icons are [Material Symbols](https://fonts.google.com/icons). |
+| **Window** | Home, Instance, Mod, Settings, over the collection wallpaper. English. Text is Roboto. Icons are [Material Icons](https://fonts.google.com/icons). |
 | **Account** | Local only. Default skin Steve. Import a PNG skin or cape. One sample cape, Rus, in the real 64×32 layout. A CPU 3D preview, classic or slim. |
 | **Instances** | Several isolated worlds of one version. New is an overlay on the window. Version files stay shared. The home card is not a button. Snapshots and previews from series 26 stay hidden until Settings turns them on. |
 | **Install** | Patches you can turn off before it starts: vanilla, assets, Java, skin, mods. Java is Adoptium Temurin. |
