@@ -3,7 +3,7 @@
 //! The line starts at `1.26.3.00`. An update changes the last two digits
 //! until the year or month component is moved on purpose.
 
-pub const VERSION: &str = "1.26.3.15";
+pub const VERSION: &str = "1.26.3.16";
 
 pub fn parse(tag: &str) -> Option<[u32; 4]> {
     let tag = tag.trim().trim_start_matches('v');

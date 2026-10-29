@@ -558,11 +558,13 @@ impl super::super::Desktop {
     pub(crate) fn paint_title_logo(&self, ui: &mut egui::Ui, full: egui::Rect) {
         let Some(tex) = &self.logo_title else { return };
         let size = tex.size();
-        let aspect = if size[1] == 0 { 1080.0 / 481.0 } else { size[0] as f32 / size[1] as f32 };
-        let h = 78.0;
-        let w = h * aspect;
+        let aspect = if size[1] == 0 { 1465.0 / 353.0 } else { size[0] as f32 / size[1] as f32 };
+        // Wide wordmark. Height is the letter height, not the old emblem's islands.
+        let h = 72.0;
+        let max_w = (full.width() - 220.0).max(180.0);
+        let w = (h * aspect).min(max_w);
         let rect = egui::Rect::from_min_size(
-            egui::pos2(full.right() - 48.0 - w, full.top() + 16.0),
+            egui::pos2(full.right() - 42.0 - w, full.top() + 8.0),
             egui::vec2(w, h),
         );
         ui.painter().image(
