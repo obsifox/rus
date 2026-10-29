@@ -1158,11 +1158,12 @@ fn paint_cover(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
 
 fn paint_title(ui: &mut egui::Ui, tex: &egui::TextureHandle, full: egui::Rect) {
     let size = tex.size();
-    let aspect = if size[1] == 0 { 1465.0 / 353.0 } else { size[0] as f32 / size[1] as f32 };
+    let aspect = if size[1] == 0 { 896.0 / 460.0 } else { size[0] as f32 / size[1] as f32 };
     let w = (full.width() * 0.74).min(full.width() - 52.0);
     let h = w / aspect;
+    // Both gates. Thirty pixels below the previous title.
     let rect = egui::Rect::from_min_size(
-        egui::pos2(full.center().x - w * 0.5, full.top() + 22.0),
+        egui::pos2(full.center().x - w * 0.5, full.top() + 52.0),
         egui::vec2(w, h),
     );
     ui.painter().image(
