@@ -126,6 +126,7 @@ struct Desktop {
     tab: Tab,
     home_pane: u8,
     home_menu: bool,
+    profile_open: bool,
     rail_view: u8,
     rail_nudge: f32,
     versions: Vec<Ver>,
@@ -261,6 +262,7 @@ impl Desktop {
             tab: Tab::from_name(&tab),
             home_pane: 0,
             home_menu: false,
+            profile_open: std::env::var("RUS_PROFILE").ok().as_deref() == Some("1"),
             rail_view: 1,
             rail_nudge: 0.0,
             versions: Vec::new(),
@@ -360,6 +362,7 @@ impl Desktop {
         spawn_mods(app.clone(), tx.clone());
         spawn_loaders(tx.clone());
         me.load_papers(&cc.egui_ctx);
+        me.load_scenes(&cc.egui_ctx);
         if me.shot.is_some() && me.tab == Tab::Mods {
             me.mod_view = 1;
             me.explore_dirty = true;
@@ -1202,9 +1205,6 @@ impl Desktop {
         let full = ui.max_rect();
         let _ = ui.allocate_rect(full, Sense::hover());
         self.paint_wallpaper(ui, full);
-        if self.tab == Tab::Home {
-            self.paint_version_veil(ui, full);
-        }
         // Drag only the empty strip above the tabs. A full-window drag was
         // stealing clicks, so the pointer had to sit above the button.
         if !self.draft_open {
@@ -1222,9 +1222,11 @@ impl Desktop {
         self.paint_exit(ui, full);
         let now = ui.input(|i| i.time);
         if self.tab != self.seen_tab {
+            self.profile_open = false;
             self.seen_tab = self.tab;
             self.tab_tick = now;
         }
+        if !self.profile_open {
         match self.tab {
             Tab::Home => {
                 self.paint_chrome(ui, full);
@@ -1252,6 +1254,7 @@ impl Desktop {
             Tab::Mods => self.paint_mods_page(ui, full),
             Tab::Settings => self.paint_settings_page(ui, full),
         }
+        }
         let age = (now - self.tab_tick) as f32;
         let fade = ease_out((age / 0.18).clamp(0.0, 1.0));
         if self.shot.is_none() && fade < 0.995 {
@@ -1273,6 +1276,9 @@ impl Desktop {
         if self.pending_pack.is_some() {
             self.paint_pack_prompt(ui, full);
         }
+        if self.profile_open {
+            self.paint_profile_popup(ui, full);
+        }
     }
 
     fn load_papers(&mut self, ctx: &egui::Context) {
@@ -1290,9 +1296,38 @@ impl Desktop {
         }
     }
 
+    fn load_scenes(&mut self, ctx: &egui::Context) {
+        let scenes: [(&str, &[u8]); 5] = [
+            ("scene:home", include_bytes!("../assets/scenes/home.jpg")),
+            ("scene:version", include_bytes!("../assets/scenes/version.jpg")),
+            ("scene:mods", include_bytes!("../assets/scenes/mods.jpg")),
+            ("scene:settings", include_bytes!("../assets/scenes/settings.jpg")),
+            ("scene:profile", include_bytes!("../assets/scenes/profile.jpg")),
+        ];
+        for (key, bytes) in scenes {
+            if let Some(tex) = load_texture(ctx, key, bytes) {
+                self.papers.insert(key.to_string(), tex);
+            }
+        }
+    }
+
+    fn scene_key(&self) -> &'static str {
+        if self.profile_open {
+            return "scene:profile";
+        }
+        match self.tab {
+            Tab::Home => "scene:home",
+            Tab::Versions => "scene:version",
+            Tab::Mods => "scene:mods",
+            Tab::Settings => "scene:settings",
+        }
+    }
+
     fn paint_wallpaper(&self, ui: &egui::Ui, full: egui::Rect) {
+        let key = self.scene_key();
         let paper = self.paper_for(&self.selected);
-        if let Some(tex) = self.papers.get(paper.title) {
+        let tex = self.papers.get(key).or_else(|| self.papers.get(paper.title));
+        if let Some(tex) = tex {
             ui.painter().rect_filled(full, 0.0, BG);
             // One official image, drawn at the window size. No wash, no crop.
             ui.painter().image(tex.id(), full, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
@@ -2946,7 +2981,7 @@ fn paint_glass_chip(painter: &egui::Painter, rect: egui::Rect, radius: f32, alph
 }
 
 fn paint_glass_panel(painter: &egui::Painter, rect: egui::Rect, radius: f32) {
-    paint_neon_plate(painter, rect, radius, panel_fill(178), glow_edge());
+    paint_neon_plate(painter, rect, radius, panel_fill(148), glow_edge());
 }
 
 fn paint_hytale_bar(painter: &egui::Painter, rect: egui::Rect) {

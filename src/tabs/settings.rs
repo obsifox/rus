@@ -3,6 +3,35 @@ use eframe::egui::{self, RichText, Sense};
 use super::super::*;
 
 impl super::super::Desktop {
+    pub(crate) fn paint_profile_popup(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
+        let dim = ui.interact(full, egui::Id::new("profile-overlay"), Sense::click());
+        let card = egui::Rect::from_center_size(egui::pos2(430.0, full.center().y + 8.0), egui::vec2(600.0, 400.0));
+        paint_settings_card(ui.painter(), card);
+        if dim.clicked() {
+            if let Some(at) = dim.interact_pointer_pos() {
+                if !card.contains(at) {
+                    self.profile_open = false;
+                    return;
+                }
+            }
+        }
+        let close = egui::Rect::from_center_size(egui::pos2(card.right() - 18.0, card.top() + 18.0), egui::vec2(22.0, 22.0));
+        let close_hit = ui.interact(close, egui::Id::new("profile-close"), Sense::click());
+        paint_empty_cross(ui.painter(), close.center(), 8.0, if close_hit.hovered() { GOLD } else { TEXT });
+        if close_hit.clicked() {
+            self.profile_open = false;
+            return;
+        }
+        ui.painter().text(
+            egui::pos2(card.left() + 18.0, card.top() + 20.0),
+            egui::Align2::LEFT_CENTER,
+            "Profile",
+            title_font(18.0),
+            GOLD,
+        );
+        self.paint_player_settings(ui, card.shrink2(egui::vec2(16.0, 36.0)).shrink2(egui::vec2(0.0, 8.0)));
+    }
+
     pub(crate) fn paint_settings_page(&mut self, ui: &mut egui::Ui, full: egui::Rect) {
         let area = spec_content(full);
         let gap = 12.0;
@@ -255,7 +284,7 @@ fn import_chip(ui: &mut egui::Ui, tip: &str, tex: egui::TextureId, size: egui::V
 }
 
 fn paint_settings_card(painter: &egui::Painter, rect: egui::Rect) {
-    painter.rect_filled(rect, 12.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 228));
+    painter.rect_filled(rect, 12.0, egui::Color32::from_rgba_unmultiplied(8, 10, 14, 168));
     painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(42)), egui::StrokeKind::Inside);
     let accent = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 1.5, rect.top() + 14.0),

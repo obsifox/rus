@@ -56,7 +56,8 @@ impl super::super::Desktop {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
         if profile.clicked() {
-            self.tab = Tab::Settings;
+            self.profile_open = true;
+            self.home_menu = false;
         }
         profile.on_hover_text(name);
 
