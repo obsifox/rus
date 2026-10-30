@@ -110,6 +110,7 @@ struct Gate {
     logo: Option<egui::TextureHandle>,
     bar_empty: Option<egui::TextureHandle>,
     bar_fill: Option<egui::TextureHandle>,
+    install_btn: [Option<egui::TextureHandle>; 3],
 }
 
 impl Gate {
@@ -121,6 +122,11 @@ impl Gate {
         let logo = load_art(&cc.egui_ctx, "gate-logo", include_bytes!("../../assets/rus-logo-title.png"));
         let bar_empty = load_art(&cc.egui_ctx, "bar-empty", include_bytes!("../../assets/progressbar-emp.png"));
         let bar_fill = load_art(&cc.egui_ctx, "bar-fill", include_bytes!("../../assets/progress-fill.png"));
+        let install_btn = [
+            load_art(&cc.egui_ctx, "install-d", include_bytes!("../../assets/buttons/install-d.png")),
+            load_art(&cc.egui_ctx, "install-h", include_bytes!("../../assets/buttons/install-h.png")),
+            load_art(&cc.egui_ctx, "install-p", include_bytes!("../../assets/buttons/install-p.png")),
+        ];
         let launch = shot.is_none() && (daily_launcher() || install_dir().is_some());
         let preview = shot.is_some();
         let preview_kind = std::env::var("RUS_GATE_PREVIEW").ok();
@@ -155,6 +161,7 @@ impl Gate {
             logo,
             bar_empty,
             bar_fill,
+            install_btn,
         };
         if launch {
             if let Some(dir) = install_dir() {
@@ -306,8 +313,10 @@ impl Gate {
                 WARN,
             );
         }
-        let install = egui::Rect::from_center_size(egui::pos2(full.center().x, full.bottom() - 52.0), egui::vec2(148.0, 42.0));
-        if gold_button(ui, install, "Install") {
+        let install_h = 58.0;
+        let install_w = install_h * (1136.0 / 456.0);
+        let install = egui::Rect::from_center_size(egui::pos2(full.center().x, full.bottom() - 46.0), egui::vec2(install_w, install_h));
+        if plate_button(ui, install, &self.install_btn) {
             self.start_install();
         }
     }
@@ -1131,6 +1140,18 @@ fn title_font(size: f32) -> egui::FontId {
 
 fn body_font(size: f32) -> egui::FontId {
     egui::FontId::new(size, egui::FontFamily::Name("Body".into()))
+}
+
+fn plate_button(ui: &mut egui::Ui, rect: egui::Rect, frames: &[Option<egui::TextureHandle>; 3]) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("gate-install"), Sense::click());
+    let index = if hit.is_pointer_button_down_on() { 2 } else if hit.hovered() { 1 } else { 0 };
+    if let Some(tex) = &frames[index] {
+        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+    }
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked()
 }
 
 fn gold_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str) -> bool {

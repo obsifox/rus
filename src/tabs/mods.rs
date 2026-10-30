@@ -493,7 +493,9 @@ impl super::super::Desktop {
             ui.painter().text(egui::pos2(box_rect.left() + 18.0, box_rect.bottom() - 78.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &warn, sub_font(12.0), box_rect.width() - 36.0), sub_font(12.0), SPEC_YELLOW);
         }
         let cancel = egui::Rect::from_min_size(egui::pos2(box_rect.left() + 18.0, box_rect.bottom() - 50.0), egui::vec2(96.0, 34.0));
-        let install = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 132.0, box_rect.bottom() - 50.0), egui::vec2(114.0, 34.0));
+        let install_h = 48.0;
+        let install_w = install_h * (1136.0 / 456.0);
+        let install = egui::Rect::from_min_size(egui::pos2(box_rect.right() - 16.0 - install_w, box_rect.bottom() - 14.0 - install_h), egui::vec2(install_w, install_h));
         let can_install = detail.ready && !detail.file_url.is_empty() && !self.explore_installing;
         if spec_button(ui, cancel, "Close", false) || xhit.clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.explore_open = None;

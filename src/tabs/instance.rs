@@ -182,7 +182,9 @@ impl super::super::Desktop {
         paint_tab_glyph(ui.painter(), Tab::Versions, egui::pos2(foot.left() + 22.0, foot.center().y), 16.0, HY_ACCENT);
         ui.painter().text(egui::pos2(foot.left() + 40.0, foot.top() + 22.0), egui::Align2::LEFT_CENTER, "WILL INSTALL", nav_font(11.0), HY_ACCENT);
         ui.painter().text(egui::pos2(foot.left() + 40.0, foot.top() + 42.0), egui::Align2::LEFT_CENTER, &ellipsize(ui.painter(), &plan, body_font(14.0), foot.width() - 230.0), body_font(14.0), HY_TEXT);
-        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 168.0, foot.center().y - 18.0), egui::vec2(150.0, 36.0));
+        let btn_h = (foot.height() - 12.0).clamp(40.0, 56.0);
+        let btn_w = btn_h * (1136.0 / 456.0);
+        let btn = egui::Rect::from_min_size(egui::pos2(foot.right() - 10.0 - btn_w, foot.center().y - btn_h * 0.5), egui::vec2(btn_w, btn_h));
         let active = chosen.iter().find(|r| r.id != "optifine").cloned();
         let raw = self.install_label(active.as_ref());
         let (label, enabled) = if raw == "INSTALL" {

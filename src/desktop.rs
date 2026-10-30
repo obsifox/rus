@@ -245,6 +245,7 @@ impl Desktop {
     fn new(cc: &eframe::CreationContext<'_>, shot: Option<String>, tab: String) -> Self {
         install_font(&cc.egui_ctx);
         style_ui(&cc.egui_ctx);
+        load_button_art(&cc.egui_ctx);
         let app = App::load();
         let _ = crate::skin::materialize_preset(&app, "skin", "steve");
         let _ = crate::skin::materialize_preset(&app, "skin", "alex");
@@ -1742,7 +1743,69 @@ pub(crate) fn paint_download_bar(painter: &egui::Painter, rect: egui::Rect, frac
     }
 }
 
+#[derive(Clone)]
+struct ButtonArt {
+    play: [egui::TextureHandle; 3],
+    stop: [egui::TextureHandle; 3],
+    install: [egui::TextureHandle; 3],
+}
+
+fn load_button_art(ctx: &egui::Context) {
+    let plate = |name: &str, bytes: &[u8]| load_texture(ctx, name, bytes).expect(name);
+    let art = ButtonArt {
+        play: [
+            plate("play-d", include_bytes!("../assets/buttons/play-d.png")),
+            plate("play-h", include_bytes!("../assets/buttons/play-h.png")),
+            plate("play-p", include_bytes!("../assets/buttons/play-p.png")),
+        ],
+        stop: [
+            plate("stop-d", include_bytes!("../assets/buttons/stop-d.png")),
+            plate("stop-h", include_bytes!("../assets/buttons/stop-h.png")),
+            plate("stop-p", include_bytes!("../assets/buttons/stop-p.png")),
+        ],
+        install: [
+            plate("install-d", include_bytes!("../assets/buttons/install-d.png")),
+            plate("install-h", include_bytes!("../assets/buttons/install-h.png")),
+            plate("install-p", include_bytes!("../assets/buttons/install-p.png")),
+        ],
+    };
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("rus-btn-art"), art));
+}
+
+fn button_art(ui: &egui::Ui) -> Option<ButtonArt> {
+    ui.ctx().data(|d| d.get_temp(egui::Id::new("rus-btn-art")))
+}
+
+/// Painted plate. Index 0 is rest, 1 is hover, 2 is pressed. The word is in the art.
+fn paint_plate(ui: &mut egui::Ui, id: &str, rect: egui::Rect, frames: &[egui::TextureHandle; 3], enabled: bool) -> bool {
+    let hit = ui.interact(rect, egui::Id::new("plate").with(id), Sense::click());
+    let pressed = enabled && hit.is_pointer_button_down_on();
+    let index = if pressed { 2 } else if enabled && hit.hovered() { 1 } else { 0 };
+    let tint = if enabled { egui::Color32::WHITE } else { egui::Color32::from_white_alpha(88) };
+    ui.painter().image(
+        frames[index].id(),
+        rect,
+        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        tint,
+    );
+    if hit.hovered() && enabled {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    hit.clicked() && enabled
+}
+
 fn play_button(ui: &mut egui::Ui, id: &str, rect: egui::Rect, label: &str, stop: bool, horizon: bool) -> bool {
+    if let Some(art) = button_art(ui) {
+        let frames = if stop || label.eq_ignore_ascii_case("stop") {
+            &art.stop
+        } else if label.eq_ignore_ascii_case("install") {
+            &art.install
+        } else {
+            &art.play
+        };
+        let _ = horizon;
+        return paint_plate(ui, id, rect, frames, true);
+    }
     let hit = ui.interact(rect, egui::Id::new(id), Sense::click());
     let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.12);
     let (fill, edge, ink) = if stop {
@@ -3278,6 +3341,12 @@ enum BtnKind {
 }
 
 fn action_button(ui: &mut egui::Ui, rect: egui::Rect, label: &str, kind: BtnKind) -> bool {
+    if label.eq_ignore_ascii_case("install") {
+        if let Some(art) = button_art(ui) {
+            let enabled = !matches!(kind, BtnKind::Quiet);
+            return paint_plate(ui, &format!("install-{}-{}", rect.left().to_bits(), rect.top().to_bits()), rect, &art.install, enabled);
+        }
+    }
     let hit = ui.interact(rect, egui::Id::new("act-btn").with(rect.top().to_bits()).with(rect.left().to_bits()).with(label), Sense::click());
     let hot = ui.ctx().animate_bool_with_time(hit.id.with("hot"), hit.hovered(), 0.1);
     let ink = match kind {

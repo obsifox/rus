@@ -474,8 +474,8 @@ impl super::super::Desktop {
         }
         self.paint_instance_card(ui, full);
 
-        let play_h = 50.0;
-        let play_w = 156.0;
+        let play_h = 56.0;
+        let play_w = play_h * (1136.0 / 456.0);
         let version = if self.selected.is_empty() { "26.3".to_string() } else { self.selected.clone() };
         let installed = self.app.is_installed(&version);
         let live = crate::play::status().get("running").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -528,7 +528,7 @@ impl super::super::Desktop {
             self.save_settings();
         }
         if !installed || installing {
-            let act = egui::Rect::from_min_size(egui::pos2(play.left() - 8.0 - 148.0, play.top()), egui::vec2(148.0, play_h));
+            let act = egui::Rect::from_min_size(egui::pos2(play.left() - 10.0 - play_w, play.top()), egui::vec2(play_w, play_h));
             let act_label = if installing { "STOP" } else { "INSTALL" };
             if play_button(ui, "install", act, act_label, installing, false) {
                 if installing {
